@@ -1,5 +1,6 @@
 :root {
   color-scheme: dark;
+  --panel-scale: 1;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     "Microsoft YaHei", sans-serif;
@@ -41,12 +42,17 @@ body {
   left: 24px;
   z-index: 5;
   width: min(340px, calc(100vw - 32px));
+  max-height: calc((100vh - 32px) / var(--panel-scale));
   padding: 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
   background: rgba(9, 13, 22, 0.72);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.34);
   backdrop-filter: blur(18px);
+  transform: scale(var(--panel-scale));
+  transform-origin: top left;
 }
 
 .brand {
@@ -54,6 +60,12 @@ body {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+}
+
+.brand-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
 }
 
 .eyebrow {
@@ -73,6 +85,8 @@ h1 {
 }
 
 .icon-button {
+  display: grid;
+  place-items: center;
   width: 38px;
   height: 38px;
   border: 1px solid rgba(255, 255, 255, 0.18);
@@ -85,6 +99,23 @@ h1 {
 
 .icon-button:hover {
   background: rgba(255, 255, 255, 0.15);
+}
+
+.panel.is-collapsed {
+  width: min(300px, calc(100vw - 24px));
+}
+
+.panel.is-collapsed .panel-body,
+.panel.is-collapsed .diagnostic {
+  display: none;
+}
+
+.panel.is-collapsed .status-row {
+  margin-bottom: 12px;
+}
+
+.panel.is-collapsed .meter {
+  margin-top: 10px;
 }
 
 .status-row {
@@ -133,6 +164,26 @@ h1 {
   font-size: 13px;
 }
 
+.panel-body {
+  margin-top: 14px;
+}
+
+.quality-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 12px;
+  color: #b8c2d1;
+  font-size: 13px;
+}
+
+.quality-row strong {
+  color: #fff;
+  font-size: 12px;
+  text-align: right;
+}
+
 select,
 input[type="color"] {
   width: 100%;
@@ -151,6 +202,28 @@ select {
 input[type="color"] {
   padding: 4px;
   cursor: pointer;
+}
+
+.scale-field {
+  margin-top: 8px;
+}
+
+.scale-control {
+  display: grid;
+  grid-template-columns: 1fr 44px;
+  align-items: center;
+  gap: 10px;
+}
+
+.scale-control input[type="range"] {
+  width: 100%;
+  accent-color: #ff4f8f;
+}
+
+.scale-control strong {
+  color: #fff;
+  font-size: 12px;
+  text-align: right;
 }
 
 .meter {
@@ -206,6 +279,8 @@ input[type="color"] {
   .panel {
     top: 12px;
     left: 12px;
+    width: min(340px, calc(100vw - 24px));
+    max-height: calc((100vh - 24px) / var(--panel-scale));
     padding: 14px;
   }
 
@@ -216,5 +291,17 @@ input[type="color"] {
   #camera {
     width: 104px;
     height: 72px;
+  }
+
+  .panel.is-collapsed {
+    padding: 12px;
+  }
+
+  .panel.is-collapsed h1 {
+    font-size: 18px;
+  }
+
+  .panel.is-collapsed .eyebrow {
+    font-size: 10px;
   }
 }

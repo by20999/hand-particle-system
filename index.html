@@ -10,15 +10,27 @@
     <main id="app">
       <canvas id="scene"></canvas>
 
-      <section class="panel" aria-label="粒子控制面板">
+      <section id="controlPanel" class="panel" aria-label="粒子控制面板">
         <div class="brand">
           <div>
             <span class="eyebrow">Realtime 3D</span>
             <h1>手势粒子场</h1>
           </div>
-          <button id="fullscreenBtn" class="icon-button" type="button" title="全屏">
-            <span aria-hidden="true">⛶</span>
-          </button>
+          <div class="brand-actions">
+            <button
+              id="panelToggleBtn"
+              class="icon-button panel-toggle"
+              type="button"
+              title="收起面板"
+              aria-controls="panelBody"
+              aria-expanded="true"
+            >
+              <span aria-hidden="true">−</span>
+            </button>
+            <button id="fullscreenBtn" class="icon-button" type="button" title="全屏">
+              <span aria-hidden="true">⛶</span>
+            </button>
+          </div>
         </div>
 
         <div class="status-row">
@@ -26,22 +38,6 @@
           <span id="statusText">等待摄像头授权</span>
         </div>
         <div id="diagnosticText" class="diagnostic">模型未启动</div>
-
-        <label class="field">
-          <span>模型</span>
-          <select id="shapeSelect">
-            <option value="heart">爱心</option>
-            <option value="flower">花朵</option>
-            <option value="saturn">土星</option>
-            <option value="buddha">佛像</option>
-            <option value="fireworks">烟花</option>
-          </select>
-        </label>
-
-        <label class="field color-field">
-          <span>颜色</span>
-          <input id="colorPicker" type="color" value="#ff4f8f" />
-        </label>
 
         <div class="meter">
           <div class="meter-label">
@@ -53,11 +49,43 @@
           </div>
         </div>
 
-        <div class="hint">
-          张开手掌会让粒子在 3D 空间中膨胀散开，收拢会聚回模型。鼠标拖拽旋转视角，滚轮缩放；按住 Shift 拖动可局部扰动粒子。
-        </div>
+        <div id="panelBody" class="panel-body">
+          <div class="quality-row">
+            <span>画质</span>
+            <strong id="qualityValue">自动</strong>
+          </div>
 
-        <video id="camera" playsinline muted></video>
+          <label class="field scale-field">
+            <span>面板</span>
+            <span class="scale-control">
+              <input id="panelScale" type="range" min="78" max="108" step="2" />
+              <strong id="panelScaleValue">100%</strong>
+            </span>
+          </label>
+
+          <label class="field">
+            <span>模型</span>
+            <select id="shapeSelect">
+              <option value="heart">爱心</option>
+              <option value="flower">花朵</option>
+              <option value="saturn">土星</option>
+              <option value="buddha">佛像</option>
+              <option value="fireworks">烟花</option>
+            </select>
+          </label>
+
+          <label class="field color-field">
+            <span>颜色</span>
+            <input id="colorPicker" type="color" value="#ff4f8f" />
+          </label>
+
+          <div class="hint">
+            张开手掌会让粒子在 3D 空间中膨胀散开，收拢会聚回模型。鼠标拖拽旋转视角，滚轮缩放；按住 Shift
+            拖动可局部扰动粒子。
+          </div>
+
+          <video id="camera" playsinline muted></video>
+        </div>
       </section>
     </main>
     <script type="module" src="/src/main.js"></script>
