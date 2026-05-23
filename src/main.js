@@ -8,6 +8,7 @@ import { MP_HANDS_ASSET_BASE, renderPixelRatio, selectQualityProfile } from "./c
 import { average, calculateHandOpenness, fistViewPose, lerpAngle, normalizeAngle, palmCenter } from "./gestures.js";
 import { applyStaticLightColors, createStaticLightSources, updateStaticLights } from "./lighting.js";
 import { createParticleSystem, setParticleTargets, snapParticlesToTargets, updateParticles } from "./particles.js";
+import { applyThemeToDocument, getTheme } from "./themes.js";
 import { createUI } from "./ui.js";
 
 const ui = createUI();
@@ -17,11 +18,17 @@ const {
   shapeSelect,
   colorPicker,
   fullscreenBtn,
+  sensitivity,
+  themeButtons,
 } = ui.refs;
 
 const qualityProfile = selectQualityProfile();
 const pixelRatio = renderPixelRatio(qualityProfile);
 ui.setQuality(qualityProfile);
+const initialTheme = getTheme(ui.getThemeId());
+colorPicker.value = initialTheme.primary;
+ui.setThemeActive(initialTheme.id);
+applyThemeToDocument(initialTheme);
 
 const clock = new THREE.Clock();
 
@@ -36,6 +43,7 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x06080d, 0.055);
+scene.fog.color.set(initialTheme.background);
 
 const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 100);
 camera.position.set(0, 1.2, 9.5);
@@ -57,17 +65,21 @@ composer.addPass(bloomPass);
 
 const particles = createParticleSystem({
   count: qualityProfile.particleCount,
-  color: colorPicker.value,
+  color: initialTheme.primary,
+  accent: initialTheme.accent,
   pixelRatio,
 });
 scene.add(particles.system);
 
-const staticLights = createStaticLightSources(new THREE.Color(colorPicker.value));
+const staticLights = createStaticLightSources(new THREE.Color(initialTheme.primary), new THREE.Color(initialTheme.accent));
 scene.add(staticLights);
 
 const state = {
   model: "heart",
-  color: new THREE.Color(colorPicker.value),
+  theme: initialTheme,
+  color: new THREE.Color(initialTheme.primary),
+  accent: new THREE.Color(initialTheme.accent),
+  sensitivity: ui.getSensitivity(),
   gesture: 0,
   gestureTarget: 0,
   smoothGesture: 0,
@@ -100,6 +112,12 @@ const state = {
   lastStatusDetailTime: 0,
   lastErrorMessage: "",
   processingVideo: false,
+  modelTransition: null,
+};
+
+const performanceStats = {
+  frames: 0,
+  lastUpdate: performance.now(),
 };
 
 setParticleTargets(particles, state.model);
@@ -109,13 +127,34 @@ animate();
 
 shapeSelect.addEventListener("change", () => {
   state.model = shapeSelect.value;
+  state.modelTransition = {
+    startedAt: performance.now(),
+    duration: 1250,
+  };
   setParticleTargets(particles, state.model);
 });
 
 colorPicker.addEventListener("input", () => {
   state.color.set(colorPicker.value);
   particles.material.uniforms.uColor.value.copy(state.color);
-  applyStaticLightColors(staticLights, state.color);
+  applyStaticLightColors(staticLights, state.color, state.accent);
+  applyThemeToDocument({
+    ...state.theme,
+    primary: colorPicker.value,
+    glowA: hexToGlow(colorPicker.value, 0.15),
+  });
+  ui.setThemeActive(null);
+});
+
+for (const button of themeButtons) {
+  button.addEventListener("click", () => {
+    const theme = getTheme(button.dataset.theme);
+    applyTheme(theme);
+  });
+}
+
+sensitivity.addEventListener("input", () => {
+  state.sensitivity = ui.getSensitivity();
 });
 
 fullscreenBtn.addEventListener("click", async () => {
@@ -124,6 +163,10 @@ fullscreenBtn.addEventListener("click", async () => {
   } else {
     await document.exitFullscreen();
   }
+});
+
+document.addEventListener("fullscreenchange", () => {
+  ui.setFullscreenActive(Boolean(document.fullscreenElement));
 });
 
 window.addEventListener("pointermove", (event) => {
@@ -229,6 +272,7 @@ function animate() {
   const delta = Math.min(clock.getDelta(), 0.033);
   const elapsed = clock.elapsedTime;
   const now = performance.now();
+  updatePerformanceStats(now);
   particles.material.uniforms.uTime.value = elapsed;
   detectHands(now);
   updateParticles(particles, state, {
@@ -284,7 +328,9 @@ function detectHands(now) {
   state.openness = openness;
   state.handSpread = spread;
   const rawGesture = hands.length >= 2 ? spread * 0.48 + openness * 0.52 : openness;
-  const responsiveGesture = THREE.MathUtils.clamp((rawGesture - 0.22) / 0.58, 0, 1);
+  const gestureFloor = THREE.MathUtils.clamp(0.22 - (state.sensitivity - 1) * 0.12, 0.08, 0.34);
+  const gestureRange = THREE.MathUtils.clamp(0.58 - (state.sensitivity - 1) * 0.16, 0.38, 0.78);
+  const responsiveGesture = THREE.MathUtils.clamp((rawGesture - gestureFloor) / gestureRange, 0, 1);
   state.gestureTarget = THREE.MathUtils.clamp(Math.pow(responsiveGesture, 1.22), 0, 1);
   state.handMode = state.gestureTarget > 0.62 ? "展开" : state.gestureTarget < 0.26 ? "收拢" : "半开";
   const follow = state.gestureTarget > state.gesture ? 0.12 : 0.28;
@@ -421,4 +467,47 @@ function updateDiagnostics(handCount, now) {
     state.lastDetectedHandTime > 0 ? Math.round((now - state.lastDetectedHandTime) / 1000) : null;
   const lastSeen = secondsSinceHand === null ? "尚未识别到手" : `${secondsSinceHand} 秒前识别过手`;
   ui.setDiagnostic(`${lastSeen}，请让完整手掌出现在下方预览框中`);
+}
+
+function applyTheme(theme) {
+  state.theme = theme;
+  state.color.set(theme.primary);
+  state.accent.set(theme.accent);
+  colorPicker.value = theme.primary;
+  particles.material.uniforms.uColor.value.copy(state.color);
+  particles.material.uniforms.uAccent.value.copy(state.accent);
+  scene.fog.color.set(theme.background);
+  applyStaticLightColors(staticLights, state.color, state.accent);
+  applyThemeToDocument(theme);
+  ui.setThemeActive(theme.id);
+  ui.saveThemeId(theme.id);
+}
+
+function updatePerformanceStats(now) {
+  performanceStats.frames += 1;
+  if (now - performanceStats.lastUpdate < 600) return;
+
+  const elapsed = now - performanceStats.lastUpdate;
+  if (performanceStats.frames < 6) {
+    ui.updatePerformance({
+      fpsLabel: "测量中",
+      particleCount: particles.count,
+    });
+    performanceStats.frames = 0;
+    performanceStats.lastUpdate = now;
+    return;
+  }
+
+  const fps = Math.round((performanceStats.frames * 1000) / elapsed);
+  performanceStats.frames = 0;
+  performanceStats.lastUpdate = now;
+  ui.updatePerformance({
+    fps,
+    particleCount: particles.count,
+  });
+}
+
+function hexToGlow(hex, alpha) {
+  const color = new THREE.Color(hex);
+  return `rgba(${Math.round(color.r * 255)}, ${Math.round(color.g * 255)}, ${Math.round(color.b * 255)}, ${alpha})`;
 }

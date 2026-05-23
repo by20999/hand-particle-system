@@ -1,4 +1,12 @@
 import * as THREE from "three";
+import createElement from "lucide/dist/esm/createElement.mjs";
+import Eye from "lucide/dist/esm/icons/eye.mjs";
+import EyeOff from "lucide/dist/esm/icons/eye-off.mjs";
+import Maximize2 from "lucide/dist/esm/icons/maximize-2.mjs";
+import Minimize2 from "lucide/dist/esm/icons/minimize-2.mjs";
+import PanelLeftClose from "lucide/dist/esm/icons/panel-left-close.mjs";
+import PanelLeftOpen from "lucide/dist/esm/icons/panel-left-open.mjs";
+import { THEMES } from "./themes.js";
 
 export function createUI() {
   const refs = {
@@ -7,6 +15,8 @@ export function createUI() {
     panel: document.querySelector("#controlPanel"),
     panelBody: document.querySelector("#panelBody"),
     panelToggleBtn: document.querySelector("#panelToggleBtn"),
+    panelHideBtn: document.querySelector("#panelHideBtn"),
+    panelRestoreBtn: document.querySelector("#panelRestoreBtn"),
     shapeSelect: document.querySelector("#shapeSelect"),
     colorPicker: document.querySelector("#colorPicker"),
     fullscreenBtn: document.querySelector("#fullscreenBtn"),
@@ -18,18 +28,49 @@ export function createUI() {
     panelScale: document.querySelector("#panelScale"),
     panelScaleValue: document.querySelector("#panelScaleValue"),
     qualityValue: document.querySelector("#qualityValue"),
+    performanceValue: document.querySelector("#performanceValue"),
+    sensitivity: document.querySelector("#sensitivity"),
+    sensitivityValue: document.querySelector("#sensitivityValue"),
+    themeButtons: [...document.querySelectorAll("[data-theme]")],
   };
 
+  initIcons(refs);
+  initThemeButtons(refs);
   initPanelScale(refs);
   initPanelCollapse(refs);
+  initPanelVisibility(refs);
+  initSensitivity(refs);
 
   return {
     refs,
     setStatus: (text, status) => setStatus(refs, text, status),
     setDiagnostic: (text) => setDiagnostic(refs, text),
     setQuality: (profile) => setQuality(refs, profile),
+    setThemeActive: (themeId) => setThemeActive(refs, themeId),
+    getThemeId: () => safeReadStorage("themeId") ?? "neon",
+    saveThemeId: (themeId) => safeWriteStorage("themeId", themeId),
+    getSensitivity: () => Number(refs.sensitivity.value) / 100,
+    updateSensitivityLabel: () => updateSensitivityLabel(refs),
+    updatePerformance: (stats) => updatePerformance(refs, stats),
+    setFullscreenActive: (active) => renderIcon(refs.fullscreenBtn, active ? Minimize2 : Maximize2),
     updateGestureMeter: (percent) => updateGestureMeter(refs, percent),
   };
+}
+
+function initIcons(refs) {
+  renderIcon(refs.panelHideBtn, EyeOff);
+  renderIcon(refs.panelRestoreBtn, Eye);
+  renderIcon(refs.panelToggleBtn, PanelLeftClose);
+  renderIcon(refs.fullscreenBtn, Maximize2);
+}
+
+function initThemeButtons(refs) {
+  for (const button of refs.themeButtons) {
+    const theme = THEMES.find((item) => item.id === button.dataset.theme);
+    if (!theme) continue;
+    button.style.setProperty("--swatch-primary", theme.primary);
+    button.style.setProperty("--swatch-secondary", theme.accent);
+  }
 }
 
 function initPanelScale(refs) {
@@ -77,7 +118,35 @@ function setPanelCollapsed(refs, collapsed) {
   refs.panel?.classList.toggle("is-collapsed", collapsed);
   refs.panelToggleBtn?.setAttribute("aria-expanded", String(!collapsed));
   refs.panelToggleBtn?.setAttribute("title", collapsed ? "展开面板" : "收起面板");
-  refs.panelToggleBtn?.querySelector("[aria-hidden='true']")?.replaceChildren(collapsed ? "+" : "−");
+  renderIcon(refs.panelToggleBtn, collapsed ? PanelLeftOpen : PanelLeftClose);
+}
+
+function initPanelVisibility(refs) {
+  refs.panelHideBtn?.addEventListener("click", () => {
+    refs.panel.classList.add("is-hidden");
+    refs.panelRestoreBtn.hidden = false;
+  });
+
+  refs.panelRestoreBtn?.addEventListener("click", () => {
+    refs.panel.classList.remove("is-hidden");
+    refs.panelRestoreBtn.hidden = true;
+  });
+}
+
+function initSensitivity(refs) {
+  const saved = Number(safeReadStorage("gestureSensitivity"));
+  const value = Number.isFinite(saved) && saved >= 70 && saved <= 140 ? saved : 100;
+  refs.sensitivity.value = String(value);
+  updateSensitivityLabel(refs);
+
+  refs.sensitivity?.addEventListener("input", () => {
+    updateSensitivityLabel(refs);
+    safeWriteStorage("gestureSensitivity", refs.sensitivity.value);
+  });
+}
+
+function updateSensitivityLabel(refs) {
+  refs.sensitivityValue.textContent = `${Math.round(Number(refs.sensitivity.value))}%`;
 }
 
 function setStatus(refs, text, status) {
@@ -95,6 +164,18 @@ function setQuality(refs, profile) {
   if (refs.qualityValue) {
     refs.qualityValue.textContent = `${profile.label} · ${Math.round(profile.particleCount / 1000)}k`;
   }
+}
+
+function setThemeActive(refs, themeId) {
+  for (const button of refs.themeButtons) {
+    button.classList.toggle("is-active", button.dataset.theme === themeId);
+  }
+}
+
+function updatePerformance(refs, stats) {
+  if (!refs.performanceValue) return;
+  const fpsText = stats.fpsLabel ?? `${stats.fps} FPS`;
+  refs.performanceValue.textContent = `${fpsText} · ${Math.round(stats.particleCount / 1000)}k 粒子`;
 }
 
 function updateGestureMeter(refs, percent) {
@@ -116,4 +197,16 @@ function safeWriteStorage(key, value) {
   } catch {
     // Local storage can be unavailable in strict privacy modes.
   }
+}
+
+function renderIcon(target, iconNode) {
+  if (!target) return;
+  const slot = target.querySelector("[aria-hidden='true']") ?? target;
+  const icon = createElement(iconNode, {
+    width: 18,
+    height: 18,
+    "aria-hidden": "true",
+    focusable: "false",
+  });
+  slot.replaceChildren(icon);
 }

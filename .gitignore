@@ -2,6 +2,7 @@ node_modules/
 dist/
 .vercel/
 
+/vite.config.js
 verification-*.png
 
 .DS_Store

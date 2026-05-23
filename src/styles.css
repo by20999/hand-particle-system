@@ -1,10 +1,15 @@
 :root {
   color-scheme: dark;
   --panel-scale: 1;
+  --theme-bg: #06080d;
+  --theme-glow-a: rgba(255, 79, 143, 0.15);
+  --theme-glow-b: rgba(63, 208, 212, 0.14);
+  --accent-primary: #ff4f8f;
+  --accent-secondary: #52d7de;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     "Microsoft YaHei", sans-serif;
-  background: #06080d;
+  background: var(--theme-bg);
   color: #f5f7fb;
 }
 
@@ -23,9 +28,9 @@ body,
 
 body {
   background:
-    radial-gradient(circle at 25% 15%, rgba(255, 79, 143, 0.15), transparent 26rem),
-    radial-gradient(circle at 80% 70%, rgba(63, 208, 212, 0.14), transparent 30rem),
-    #06080d;
+    radial-gradient(circle at 25% 15%, var(--theme-glow-a), transparent 26rem),
+    radial-gradient(circle at 80% 70%, var(--theme-glow-b), transparent 30rem),
+    var(--theme-bg);
 }
 
 #scene {
@@ -74,7 +79,7 @@ body {
   font-size: 11px;
   line-height: 1;
   text-transform: uppercase;
-  color: #94d9dc;
+  color: color-mix(in srgb, var(--accent-secondary) 72%, #ffffff 28%);
 }
 
 h1 {
@@ -99,6 +104,43 @@ h1 {
 
 .icon-button:hover {
   background: rgba(255, 255, 255, 0.15);
+}
+
+.icon-button svg,
+.floating-panel-button svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2;
+}
+
+.panel.is-hidden {
+  display: none;
+}
+
+.floating-panel-button {
+  position: fixed;
+  top: 24px;
+  left: 24px;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(9, 13, 22, 0.72);
+  color: #fff;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(18px);
+  cursor: pointer;
+}
+
+.floating-panel-button:hover {
+  background: rgba(255, 255, 255, 0.13);
+}
+
+.floating-panel-button[hidden] {
+  display: none;
 }
 
 .panel.is-collapsed {
@@ -145,8 +187,8 @@ h1 {
 }
 
 .status-dot.ready {
-  background: #46f0ad;
-  box-shadow: 0 0 0 4px rgba(70, 240, 173, 0.14);
+  background: var(--accent-secondary);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-secondary) 22%, transparent);
 }
 
 .status-dot.error {
@@ -184,6 +226,53 @@ h1 {
   text-align: right;
 }
 
+.theme-field {
+  align-items: start;
+}
+
+.theme-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.theme-button {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #e8edf5;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.theme-button span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theme-button:hover,
+.theme-button.is-active {
+  border-color: color-mix(in srgb, var(--accent-primary) 72%, #ffffff 28%);
+  background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
+}
+
+.theme-swatch {
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--swatch-primary), var(--swatch-secondary));
+}
+
 select,
 input[type="color"] {
   width: 100%;
@@ -217,7 +306,7 @@ input[type="color"] {
 
 .scale-control input[type="range"] {
   width: 100%;
-  accent-color: #ff4f8f;
+  accent-color: var(--accent-primary);
 }
 
 .scale-control strong {
@@ -253,7 +342,7 @@ input[type="color"] {
   width: 0%;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #ff4f8f, #52d7de);
+  background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
   transition: width 90ms linear;
 }
 
@@ -284,6 +373,11 @@ input[type="color"] {
     padding: 14px;
   }
 
+  .floating-panel-button {
+    top: 12px;
+    left: 12px;
+  }
+
   h1 {
     font-size: 21px;
   }
@@ -291,6 +385,10 @@ input[type="color"] {
   #camera {
     width: 104px;
     height: 72px;
+  }
+
+  .theme-buttons {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .panel.is-collapsed {

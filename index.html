@@ -17,6 +17,9 @@
             <h1>手势粒子场</h1>
           </div>
           <div class="brand-actions">
+            <button id="panelHideBtn" class="icon-button" type="button" title="隐藏面板">
+              <span aria-hidden="true"></span>
+            </button>
             <button
               id="panelToggleBtn"
               class="icon-button panel-toggle"
@@ -25,10 +28,10 @@
               aria-controls="panelBody"
               aria-expanded="true"
             >
-              <span aria-hidden="true">−</span>
+              <span aria-hidden="true"></span>
             </button>
             <button id="fullscreenBtn" class="icon-button" type="button" title="全屏">
-              <span aria-hidden="true">⛶</span>
+              <span aria-hidden="true"></span>
             </button>
           </div>
         </div>
@@ -55,6 +58,11 @@
             <strong id="qualityValue">自动</strong>
           </div>
 
+          <div class="quality-row">
+            <span>性能</span>
+            <strong id="performanceValue">-- FPS · --</strong>
+          </div>
+
           <label class="field scale-field">
             <span>面板</span>
             <span class="scale-control">
@@ -62,6 +70,32 @@
               <strong id="panelScaleValue">100%</strong>
             </span>
           </label>
+
+          <div class="field theme-field">
+            <span>主题</span>
+            <div id="themeButtons" class="theme-buttons" aria-label="主题配色预设">
+              <button class="theme-button" type="button" data-theme="neon" title="霓虹粉蓝">
+                <span class="theme-swatch"></span>
+                <span>霓虹</span>
+              </button>
+              <button class="theme-button" type="button" data-theme="gold" title="金色暖光">
+                <span class="theme-swatch"></span>
+                <span>金暖</span>
+              </button>
+              <button class="theme-button" type="button" data-theme="ice" title="冰蓝">
+                <span class="theme-swatch"></span>
+                <span>冰蓝</span>
+              </button>
+              <button class="theme-button" type="button" data-theme="aurora" title="紫绿">
+                <span class="theme-swatch"></span>
+                <span>紫绿</span>
+              </button>
+              <button class="theme-button" type="button" data-theme="blackGold" title="黑金">
+                <span class="theme-swatch"></span>
+                <span>黑金</span>
+              </button>
+            </div>
+          </div>
 
           <label class="field">
             <span>模型</span>
@@ -79,6 +113,14 @@
             <input id="colorPicker" type="color" value="#ff4f8f" />
           </label>
 
+          <label class="field sensitivity-field">
+            <span>灵敏度</span>
+            <span class="scale-control">
+              <input id="sensitivity" type="range" min="70" max="140" step="5" value="100" />
+              <strong id="sensitivityValue">100%</strong>
+            </span>
+          </label>
+
           <div class="hint">
             张开手掌会让粒子在 3D 空间中膨胀散开，收拢会聚回模型。鼠标拖拽旋转视角，滚轮缩放；按住 Shift
             拖动可局部扰动粒子。
@@ -87,6 +129,10 @@
           <video id="camera" playsinline muted></video>
         </div>
       </section>
+
+      <button id="panelRestoreBtn" class="floating-panel-button" type="button" title="显示面板" hidden>
+        <span aria-hidden="true"></span>
+      </button>
     </main>
     <script type="module" src="/src/main.js"></script>
   </body>

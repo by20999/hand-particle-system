@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { MODEL_SCALE, START_SCALE } from "./config.js";
 import { writeShapeTargets } from "./shapes.js";
 
-export function createParticleSystem({ count, color, pixelRatio }) {
+export function createParticleSystem({ count, color, accent = "#52d7de", pixelRatio }) {
   const geometry = new THREE.BufferGeometry();
   const positions = new Float32Array(count * 3);
   const targets = new Float32Array(count * 3);
@@ -54,7 +54,7 @@ export function createParticleSystem({ count, color, pixelRatio }) {
     uniforms: {
       uTime: { value: 0 },
       uColor: { value: new THREE.Color(color) },
-      uAccent: { value: new THREE.Color("#52d7de") },
+      uAccent: { value: new THREE.Color(accent) },
       uPixelRatio: { value: pixelRatio },
       uPointSize: { value: 30 },
     },
@@ -176,15 +176,25 @@ export function updateParticles(particles, state, options) {
   const g = state.smoothGesture;
   const handActive = now - state.lastHandResultTime < 1200 && state.detectedHands.length > 0;
   const recovering = !state.pointerDown && now < state.recoverUntil;
+  let transitionBoost = 0;
+  if (state.modelTransition) {
+    const transitionProgress = (now - state.modelTransition.startedAt) / state.modelTransition.duration;
+    if (transitionProgress >= 1) {
+      state.modelTransition = null;
+    } else {
+      transitionBoost = Math.sin(Math.PI * THREE.MathUtils.clamp(transitionProgress, 0, 1));
+    }
+  }
   const shapeGesture = handActive ? g : Math.min(g, 0.34 + state.pointerBoost * 0.18);
   const modelScale = MODEL_SCALE * (0.48 + shapeGesture * 2.85);
   const diffusion = recovering
     ? 0.04 + shapeGesture * 0.28
-    : 0.05 + shapeGesture * 4.25 + state.pointerBoost * 0.38;
-  const radialExpansion = shapeGesture * 3.6;
-  const depthExpansion = shapeGesture * 5.2;
-  const returnStrength = recovering ? 10.5 : 4.8 + (1 - shapeGesture) * 8.2;
-  const swirlStrength = recovering ? 0 : 0.04 + shapeGesture * 0.72 + state.pointerBoost * 0.32;
+    : 0.05 + shapeGesture * 4.25 + state.pointerBoost * 0.38 + transitionBoost * 2.8;
+  const radialExpansion = shapeGesture * 3.6 + transitionBoost * 2.2;
+  const depthExpansion = shapeGesture * 5.2 + transitionBoost * 3.0;
+  const transitionReturn = 2.8 + (1 - transitionBoost) * 8.4;
+  const returnStrength = recovering ? 10.5 : Math.min(4.8 + (1 - shapeGesture) * 8.2, transitionReturn);
+  const swirlStrength = recovering ? 0 : 0.04 + shapeGesture * 0.72 + state.pointerBoost * 0.32 + transitionBoost * 0.85;
   const pointerActive = (state.pointerDown || now < state.pointerActiveUntil) && state.pointer.x < 10;
   const pointerPower = state.pointerDown ? 1 : 0.52;
   const pointerX = state.pointer.x * 4.2;
@@ -275,7 +285,7 @@ export function updateParticles(particles, state, options) {
   }
 
   geometry.attributes.position.needsUpdate = true;
-  bloomPass.strength = 0.48 + shapeGesture * 0.28;
+  bloomPass.strength = 0.48 + shapeGesture * 0.28 + transitionBoost * 0.18;
   material.uniforms.uPointSize.value = 18 + shapeGesture * 5;
   onGestureUpdate(Math.round(g * 100));
 }

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-export function createStaticLightSources(baseColor) {
+export function createStaticLightSources(baseColor, accentColor = baseColor) {
   const group = new THREE.Group();
   group.userData.ambient = new THREE.AmbientLight(0xffffff, 0.12);
   group.add(group.userData.ambient);
@@ -33,18 +33,20 @@ export function createStaticLightSources(baseColor) {
     group.userData.layers.push({ ...light, point, sprite, material });
   }
 
-  applyStaticLightColors(group, baseColor);
+  applyStaticLightColors(group, baseColor, accentColor);
   return group;
 }
 
-export function applyStaticLightColors(lightGroup, baseColor) {
+export function applyStaticLightColors(lightGroup, baseColor, accentColor = baseColor) {
   const hsl = {};
+  const accentHsl = {};
   baseColor.getHSL(hsl);
+  accentColor.getHSL(accentHsl);
   const main = new THREE.Color().setHSL(hsl.h, Math.min(0.92, hsl.s * 0.82 + 0.12), 0.58);
   const wash = new THREE.Color().setHSL(
-    hsl.h,
-    Math.min(0.76, hsl.s * 0.5 + 0.08),
-    Math.min(0.78, hsl.l + 0.22),
+    accentHsl.h,
+    Math.min(0.82, accentHsl.s * 0.58 + 0.1),
+    Math.min(0.82, accentHsl.l + 0.2),
   );
   const shade = new THREE.Color().setHSL(
     (hsl.h + 0.965) % 1,
