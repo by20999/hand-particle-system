@@ -1,16 +1,134 @@
 const TAU = Math.PI * 2;
+const textPointCache = new Map();
+
+const ROSE_OUTER_PETALS = [
+  { angle: 2.95, length: 0.86, width: 0.22, baseX: -0.04, baseY: 0.1, z: 0.05, cup: 0.22, mix: 0.14 },
+  { angle: 0.1, length: 0.94, width: 0.24, baseX: 0.02, baseY: 0.1, z: 0.03, cup: 0.24, mix: 0.2 },
+  { angle: 2.32, length: 0.72, width: 0.2, baseX: -0.08, baseY: 0.18, z: 0.1, cup: 0.2, mix: 0.18 },
+  { angle: 0.78, length: 0.72, width: 0.2, baseX: 0.08, baseY: 0.18, z: 0.1, cup: 0.2, mix: 0.22 },
+  { angle: -2.32, length: 0.62, width: 0.18, baseX: -0.04, baseY: 0.02, z: -0.02, cup: 0.16, mix: 0.28 },
+  { angle: -0.72, length: 0.7, width: 0.18, baseX: 0.05, baseY: 0.02, z: -0.02, cup: 0.16, mix: 0.3 },
+  { angle: 1.58, length: 0.62, width: 0.18, baseX: 0.0, baseY: 0.16, z: 0.16, cup: 0.18, mix: 0.16 },
+];
+
+const ROSE_MID_PETALS = [
+  { angle: 2.85, length: 0.5, width: 0.15, baseX: -0.03, baseY: 0.2, z: 0.18, cup: 0.16, mix: 0.12 },
+  { angle: 0.25, length: 0.54, width: 0.16, baseX: 0.03, baseY: 0.2, z: 0.18, cup: 0.16, mix: 0.18 },
+  { angle: 1.35, length: 0.48, width: 0.14, baseX: 0.02, baseY: 0.24, z: 0.24, cup: 0.2, mix: 0.1 },
+  { angle: 2.08, length: 0.42, width: 0.13, baseX: -0.02, baseY: 0.24, z: 0.22, cup: 0.18, mix: 0.16 },
+  { angle: 0.96, length: 0.42, width: 0.13, baseX: 0.04, baseY: 0.23, z: 0.2, cup: 0.18, mix: 0.2 },
+];
+
+const ROSE_PETALS = [
+  { angle: 2.95, length: 1.08, width: 0.34, baseX: 0.1, baseY: 0.18, z: 0.03, cup: 0.25, curl: 0.23, mix: 0.03 },
+  { angle: 0.18, length: 1.0, width: 0.35, baseX: 0.02, baseY: 0.16, z: 0.05, cup: 0.26, curl: 0.24, mix: 0.05 },
+  { angle: 2.35, length: 0.78, width: 0.27, baseX: 0.02, baseY: 0.31, z: 0.16, cup: 0.24, curl: 0.18, mix: 0.08 },
+  { angle: 0.78, length: 0.76, width: 0.26, baseX: 0.08, baseY: 0.31, z: 0.15, cup: 0.24, curl: 0.18, mix: 0.09 },
+  { angle: -2.48, length: 0.66, width: 0.24, baseX: 0.02, baseY: 0.11, z: -0.01, cup: 0.2, curl: 0.17, mix: 0.1 },
+  { angle: -0.68, length: 0.7, width: 0.23, baseX: 0.1, baseY: 0.1, z: 0.0, cup: 0.19, curl: 0.17, mix: 0.12 },
+  { angle: 1.62, length: 0.66, width: 0.23, baseX: 0.06, baseY: 0.3, z: 0.23, cup: 0.28, curl: 0.16, mix: 0.06 },
+  { angle: 2.86, length: 0.56, width: 0.18, baseX: 0.06, baseY: 0.36, z: 0.28, cup: 0.22, curl: 0.14, mix: 0.04 },
+  { angle: 0.34, length: 0.56, width: 0.18, baseX: 0.06, baseY: 0.36, z: 0.3, cup: 0.22, curl: 0.14, mix: 0.07 },
+  { angle: 1.18, length: 0.48, width: 0.16, baseX: 0.08, baseY: 0.39, z: 0.36, cup: 0.25, curl: 0.13, mix: 0.05 },
+  { angle: 2.02, length: 0.44, width: 0.15, baseX: 0.04, baseY: 0.38, z: 0.35, cup: 0.24, curl: 0.13, mix: 0.08 },
+];
+
+const FIREWORK_CENTERS = [
+  { x: -0.82, y: 0.56, z: -0.08, scale: 0.82, hue: 0.08 },
+  { x: 0.78, y: 0.62, z: 0.12, scale: 0.9, hue: 0.22 },
+  { x: -0.36, y: -0.02, z: 0.08, scale: 0.66, hue: 0.48 },
+  { x: 0.48, y: -0.08, z: -0.16, scale: 0.62, hue: 0.72 },
+  { x: 0.02, y: 0.34, z: 0.02, scale: 0.7, hue: 0.9 },
+];
+
+export const TEXT_FONT_PRESETS = [
+  {
+    id: "modern",
+    label: "现代黑体",
+    weight: 620,
+    stack: '"HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif',
+    scaleX: 1,
+    tracking: 0,
+  },
+  {
+    id: "serif",
+    label: "优雅宋体",
+    weight: 600,
+    stack: '"Noto Serif SC", "Source Han Serif SC", "Songti SC", "SimSun", serif',
+    scaleX: 0.94,
+    tracking: 6,
+    stroke: 2,
+  },
+  {
+    id: "rounded",
+    label: "柔和圆体",
+    weight: 620,
+    stack: '"Alibaba PuHuiTi", "YouYuan", "Microsoft YaHei UI", "PingFang SC", sans-serif',
+    scaleX: 1.04,
+    tracking: 3,
+  },
+  {
+    id: "cinema",
+    label: "电影标题",
+    weight: 760,
+    stack: '"Impact", "Arial Black", "Microsoft YaHei", sans-serif',
+    scaleX: 1.14,
+    tracking: 4,
+    skew: -0.08,
+  },
+  {
+    id: "bubble",
+    label: "圆润泡泡",
+    weight: 760,
+    stack: '"YouYuan", "Arial Rounded MT Bold", "Microsoft YaHei UI", "PingFang SC", sans-serif',
+    scaleX: 1.08,
+    tracking: 5,
+    stroke: 8,
+  },
+  {
+    id: "comic",
+    label: "俏皮动漫",
+    weight: 820,
+    stack: '"Comic Sans MS", "Marker Felt", "YouYuan", "Microsoft YaHei UI", cursive',
+    scaleX: 1.08,
+    tracking: 8,
+    wobble: 0.18,
+    baselineWave: 8,
+    stroke: 3,
+  },
+  {
+    id: "candy",
+    label: "糖果手写",
+    weight: 720,
+    stack: '"Comic Sans MS", "Segoe Print", "Bradley Hand ITC", "YouYuan", cursive',
+    scaleX: 1.02,
+    tracking: 7,
+    wobble: -0.12,
+    baselineWave: 6,
+    skew: -0.12,
+  },
+];
 
 export function writeShapeTargets(model, buffers) {
   const generators = {
     heart: heartPoint,
-    flower: flowerPoint,
+    flower: rosePoint,
     saturn: saturnPoint,
-    buddha: buddhaPoint,
     fireworks: fireworksPoint,
   };
   const generator = generators[model] ?? heartPoint;
-  const { count, targets, randomness, colorMixes, brightnesses, targetRadii, targetDirX, targetDirY, targetDirZ } =
-    buffers;
+  const {
+    count,
+    targets,
+    randomness,
+    colorMixes,
+    brightnesses,
+    targetRadii,
+    targetDirX,
+    targetDirY,
+    targetDirZ,
+    targetKinds,
+  } = buffers;
 
   for (let i = 0; i < count; i += 1) {
     const p = generator(i / count, randomness[i], i);
@@ -20,13 +138,174 @@ export function writeShapeTargets(model, buffers) {
     targets[i3 + 2] = p.z;
     colorMixes[i] = p.mix ?? hash(i * 2.37);
     brightnesses[i] = p.glow ?? 1;
+    if (targetKinds) {
+      targetKinds[i] = p.kind ?? 0;
+    }
 
-    const radius = Math.hypot(p.x, p.y, p.z) + 0.001;
+    const dirX = p.dirX ?? p.x;
+    const dirY = p.dirY ?? p.y;
+    const dirZ = p.dirZ ?? p.z;
+    const radius = Math.hypot(dirX, dirY, dirZ) + 0.001;
     targetRadii[i] = radius;
-    targetDirX[i] = p.x / radius;
-    targetDirY[i] = p.y / radius;
-    targetDirZ[i] = p.z / radius;
+    targetDirX[i] = dirX / radius;
+    targetDirY[i] = dirY / radius;
+    targetDirZ[i] = dirZ / radius;
   }
+}
+
+export function writeTextTargets(text, buffers, fontId = "modern") {
+  const normalized = normalizeText(text);
+  const points = getTextPoints(normalized, fontId);
+  const { count, targets, colorMixes, brightnesses, targetRadii, targetDirX, targetDirY, targetDirZ, targetKinds } =
+    buffers;
+
+  for (let i = 0; i < count; i += 1) {
+    const point = points[Math.floor(hash(i * 11.31) * points.length)] ?? { x: 0, y: 0, alpha: 1 };
+    const jitter = 0.006 + (1 - point.alpha) * 0.008;
+    const x = point.x + (hash(i * 3.71) - 0.5) * jitter;
+    const y = point.y + (hash(i * 4.91) - 0.5) * jitter;
+    const z = (hash(i * 7.43) - 0.5) * (0.055 + point.alpha * 0.075);
+    const i3 = i * 3;
+
+    targets[i3] = x;
+    targets[i3 + 1] = y;
+    targets[i3 + 2] = z;
+    colorMixes[i] = 0.22 + point.alpha * 0.26 + hash(i * 2.17) * 0.14;
+    brightnesses[i] = 0.34 + point.alpha * 0.22 + hash(i * 1.91) * 0.06;
+    if (targetKinds) {
+      targetKinds[i] = 0;
+    }
+
+    const radius = Math.hypot(x, y, z) + 0.001;
+    targetRadii[i] = radius;
+    targetDirX[i] = x / radius;
+    targetDirY[i] = y / radius;
+    targetDirZ[i] = z / radius;
+  }
+}
+
+function normalizeText(text) {
+  const trimmed = String(text ?? "").trim();
+  return trimmed.length > 0 ? trimmed.slice(0, 18) : "LOVE";
+}
+
+function getTextPoints(text, fontId) {
+  const preset = getTextFontPreset(fontId);
+  const cacheKey = `${preset.id}:${text}`;
+  if (textPointCache.has(cacheKey)) {
+    return textPointCache.get(cacheKey);
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 1200;
+  canvas.height = 360;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#ffffff";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+
+  const lines = wrapText(context, text, preset);
+  const fontSize = lines.length > 1 ? 108 : 138;
+  context.font = `${preset.weight} ${fontSize}px ${preset.stack}`;
+  context.lineJoin = "round";
+  context.lineCap = "round";
+  const lineHeight = fontSize * 1.08;
+  const startY = canvas.height / 2 - ((lines.length - 1) * lineHeight) / 2;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    drawTextLine(context, lines[i], canvas.width / 2, startY + i * lineHeight, preset, fontSize, i);
+  }
+
+  const image = context.getImageData(0, 0, canvas.width, canvas.height);
+  const raw = [];
+  let minX = canvas.width;
+  let minY = canvas.height;
+  let maxX = 0;
+  let maxY = 0;
+
+  for (let y = 0; y < canvas.height; y += 3) {
+    for (let x = 0; x < canvas.width; x += 3) {
+      const alpha = image.data[(y * canvas.width + x) * 4 + 3] / 255;
+      if (alpha <= 0.18) continue;
+      raw.push({ x, y, alpha });
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  if (raw.length === 0) {
+    return [{ x: 0, y: 0, alpha: 1 }];
+  }
+
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const maxDim = Math.max(maxX - minX, maxY - minY, 1);
+  const points = raw.map((point) => ({
+    x: ((point.x - centerX) / maxDim) * 2.48,
+    y: -((point.y - centerY) / maxDim) * 2.48,
+    alpha: point.alpha,
+  }));
+
+  textPointCache.set(cacheKey, points);
+  return points;
+}
+
+function wrapText(context, text, preset) {
+  context.font = `${preset.weight} 116px ${preset.stack}`;
+  if (context.measureText(text).width <= 980 || text.length <= 8) {
+    return [text];
+  }
+
+  const splitAt = Math.ceil(text.length / 2);
+  return [text.slice(0, splitAt), text.slice(splitAt)];
+}
+
+function drawTextLine(context, line, centerX, centerY, preset, fontSize, lineIndex) {
+  const chars = [...line];
+  const tracking = preset.tracking ?? 0;
+  const skew = preset.skew ?? 0;
+
+  if (!preset.wobble && !tracking && !skew && !preset.stroke && (preset.scaleX ?? 1) === 1) {
+    context.fillText(line, centerX, centerY);
+    return;
+  }
+
+  context.save();
+  context.translate(centerX, centerY);
+  context.transform(preset.scaleX ?? 1, 0, skew, 1, 0, 0);
+  context.font = `${preset.weight} ${fontSize}px ${preset.stack}`;
+
+  const widths = chars.map((char) => context.measureText(char).width);
+  const totalWidth = widths.reduce((total, width) => total + width, 0) + tracking * Math.max(0, chars.length - 1);
+  let cursor = -totalWidth / 2;
+
+  for (let i = 0; i < chars.length; i += 1) {
+    const char = chars[i];
+    const width = widths[i];
+    const x = cursor + width / 2;
+    const wave = preset.baselineWave ? Math.sin(i * 1.18 + lineIndex * 0.7) * preset.baselineWave : 0;
+    const rotation = preset.wobble ? Math.sin(i * 1.7 + lineIndex) * preset.wobble : 0;
+    context.save();
+    context.translate(x, wave);
+    context.rotate(rotation);
+    if (preset.stroke) {
+      context.strokeStyle = "#ffffff";
+      context.lineWidth = preset.stroke;
+      context.strokeText(char, 0, 0);
+    }
+    context.fillText(char, 0, 0);
+    context.restore();
+    cursor += width + tracking;
+  }
+
+  context.restore();
+}
+
+function getTextFontPreset(fontId) {
+  return TEXT_FONT_PRESETS.find((preset) => preset.id === fontId) ?? TEXT_FONT_PRESETS[0];
 }
 
 function heartPoint(t, r, i) {
@@ -120,91 +399,331 @@ function heart2DField(x, y) {
   return a * a * a - x * x * y * y * y;
 }
 
-function flowerPoint(t, r) {
-  const layer = Math.floor(t * 7);
-  const local = (t * 7) % 1;
-  const angle = local * TAU + layer * 0.42;
-  const petalRadius = 0.34 + 0.72 * Math.sin(local * Math.PI) ** 0.7;
-  const ring = layer === 0 ? r * 0.28 : petalRadius * Math.sqrt(r);
-  const centerOffset = layer === 0 ? 0 : 0.72;
+function rosePoint(t, r, i) {
+  if (t < 0.07) {
+    return roseStemPoint(t / 0.07, i);
+  }
+
+  if (t < 0.12) {
+    return roseLeafPoint((t - 0.07) / 0.05, i);
+  }
+
+  if (t < 0.19) {
+    return roseSepalPoint((t - 0.12) / 0.07, i);
+  }
+
+  const petalPick = hash(i * 0.83);
+  const petalLocal = hash(i * 1.37 + t * 9.7);
+  if (petalPick < 0.28) {
+    return roseGuardPetal(petalLocal, r, i, petalPick > 0.2);
+  }
+
+  if (petalPick < 0.62) {
+    return rosePetal3D(0, petalLocal, r, i, petalPick > 0.54);
+  }
+
+  if (petalPick < 0.84) {
+    return rosePetal3D(1, petalLocal, r, i, petalPick > 0.76);
+  }
+
+  if (petalPick < 0.96) {
+    return rosePetal3D(2, petalLocal, r, i, petalPick > 0.9);
+  }
+
+  return roseInnerWhorl(petalLocal, r, i);
+}
+
+function roseStemPoint(stemT, i) {
+  const bend = Math.sin(stemT * Math.PI * 0.82) * 0.08 - stemT * 0.04;
+  const angle = hash(i * 13.7) * TAU;
+  const radius = 0.016 + hash(i * 8.1) * 0.024;
   return {
-    x: Math.cos(angle) * (ring + centerOffset),
-    y: Math.sin(angle) * (ring + centerOffset) * 0.82,
-    z: Math.sin(angle * 3 + r * 4) * 0.16,
-    mix: layer / 7,
+    x: bend + Math.cos(angle) * radius,
+    y: -1.34 + stemT * 1.05,
+    z: -0.03 + Math.sin(angle) * radius,
+    mix: 1.55 + hash(i * 2.1) * 0.16,
+    glow: 0.18,
+    kind: 3,
+    dirX: bend * 0.8,
+    dirY: -0.48,
+    dirZ: -0.02,
+  };
+}
+
+function roseLeafPoint(local, i) {
+  const side = Math.floor(local * 4) % 2 === 0 ? -1 : 1;
+  const u = hash(i * 4.73) ** 0.66;
+  const v = (hash(i * 7.17) - 0.5) * 2;
+  const baseY = -0.92 + hash(i * 1.61) * 0.28;
+  const angle = (side < 0 ? 2.46 : 0.68) + (hash(i * 2.8) - 0.5) * 0.18;
+  const axisX = Math.cos(angle);
+  const axisZ = Math.sin(angle);
+  const normalX = -axisZ;
+  const normalZ = axisX;
+  const width = 0.12 * Math.sin(u * Math.PI) * (1 - u * 0.15);
+  const x = side * 0.03 + axisX * u * 0.52 + normalX * v * width;
+  const y = baseY + u * 0.18 + Math.abs(v) * width * 0.18;
+  const z = -0.03 + axisZ * u * 0.28 + normalZ * v * width;
+  const vein = Math.abs(v) < 0.14 ? 0.13 : 0;
+
+  return {
+    x,
+    y,
+    z,
+    mix: 1.42 + vein + hash(i * 6.31) * 0.14,
+    glow: 0.2 + vein * 0.2,
+    kind: 3,
+    dirX: side * 0.42,
+    dirY: 0.08,
+    dirZ: -0.02,
+  };
+}
+
+function roseSepalPoint(local, i) {
+  const sepal = Math.floor(local * 9);
+  const u = hash(i * 3.11) ** 0.72;
+  const v = (hash(i * 3.9) - 0.5) * 2;
+  const angle = (sepal / 9) * TAU + (hash(sepal * 1.7) - 0.5) * 0.16;
+  const length = 0.32 + hash(sepal * 2.7) * 0.22;
+  const width = (0.026 + hash(i * 4.2) * 0.028) * Math.sin(u * Math.PI);
+  const radius = 0.13 + u * length;
+  const droop = u * u * 0.24;
+
+  return {
+    x: Math.cos(angle) * radius - Math.sin(angle) * v * width,
+    y: -0.23 - droop + Math.abs(v) * width * 0.18,
+    z: Math.sin(angle) * radius + Math.cos(angle) * v * width,
+    mix: 1.5 + hash(i * 4.11) * 0.16,
+    glow: 0.24,
+    kind: 3,
+    dirX: Math.cos(angle) * 0.38,
+    dirY: -0.24,
+    dirZ: Math.sin(angle) * 0.38,
+  };
+}
+
+function roseGuardPetal(local, r, i, rimOnly) {
+  const petalCount = 8;
+  const petalIndex = Math.floor(hash(i * 2.43 + local * 5.1) * petalCount);
+  const baseAngle = (petalIndex / petalCount) * TAU + (hash(petalIndex * 6.7) - 0.5) * 0.22;
+  const u = rimOnly ? hash(i * 3.37) ** 0.54 : hash(i * 4.17 + local * 2.9) ** 0.74;
+  const side = hash(i * 5.31) > 0.5 ? 1 : -1;
+  const v = rimOnly ? side * (0.7 + hash(i * 4.89) * 0.3) : (hash(i * 7.43) - 0.5) * 2;
+  const edge = Math.abs(v);
+  const tip = smoothstep(0.48, 1, u);
+  const width = 0.3 * Math.sin(u * Math.PI) ** 0.55 * (1.16 - u * 0.16);
+  const theta = baseAngle + v * 0.48 * Math.sin(u * Math.PI) ** 0.72 + tip * 0.12 * side;
+  const radius = 0.16 + u * 0.68 + edge * edge * (0.06 + tip * 0.16);
+  const cup = (1 - edge * 0.34) * Math.sin(u * Math.PI) * 0.24;
+  const rolledRim = edge ** 2 * (0.06 + tip * 0.32);
+  const droop = u * u * 0.38;
+  const y =
+    -0.26 +
+    u * 0.48 -
+    droop +
+    cup +
+    rolledRim +
+    (hash(petalIndex * 4.1 + i * 0.02) - 0.5) * 0.14;
+  const x = Math.cos(theta) * radius;
+  const z = Math.sin(theta) * radius;
+  const vein = Math.sin((v + 1) * Math.PI * 10 + u * 13) * 0.014 * (1 - edge) * (1 - u * 0.18);
+
+  return {
+    x,
+    y: y + vein,
+    z,
+    mix: 0.01 + hash(i * 2.17) * 0.055 + (rimOnly ? 0.05 : 0),
+    glow: 0.42 + tip * 0.2 + (rimOnly ? 0.54 : 0),
+    kind: rimOnly ? 1 : 0,
+    dirX: Math.cos(theta) * (0.62 + u * 0.86),
+    dirY: -0.04 + u * 0.22,
+    dirZ: Math.sin(theta) * (0.62 + u * 0.86),
+  };
+}
+
+function rosePetal3D(layer, local, r, i, rimOnly) {
+  const layerConfig = [
+    { petals: 15, radius: 0.09, length: 0.62, width: 0.25, y: -0.18, lift: 0.58, droop: 0.3, curl: 0.36, spread: 0.5 },
+    { petals: 17, radius: 0.05, length: 0.5, width: 0.2, y: -0.03, lift: 0.58, droop: 0.14, curl: 0.38, spread: 0.58 },
+    { petals: 15, radius: 0.02, length: 0.34, width: 0.13, y: 0.11, lift: 0.54, droop: 0.04, curl: 0.56, spread: 0.74 },
+  ][layer];
+  const petalIndex = Math.floor(local * layerConfig.petals);
+  const petalLocal = (local * layerConfig.petals) % 1;
+  const baseAngle =
+    (petalIndex / layerConfig.petals) * TAU +
+    layer * 0.58 +
+    (hash(petalIndex * 3.71 + layer * 12.4) - 0.5) * 0.16;
+  const u = rimOnly ? hash(i * 3.37) ** 0.54 : hash(i * 4.17 + petalLocal) ** 0.7;
+  const edgeSide = hash(i * 5.31) > 0.5 ? 1 : -1;
+  const v = rimOnly ? edgeSide * (0.72 + hash(i * 4.89) * 0.28) : (hash(i * 7.43) - 0.5) * 2;
+  const edge = Math.abs(v);
+  const tip = smoothstep(0.55, 1, u);
+  const width = layerConfig.width * Math.sin(u * Math.PI) ** 0.58 * (1.08 - u * 0.18);
+  const twist = layer === 2 ? u * 1.15 : Math.sin(u * Math.PI) * 0.18;
+  const theta = baseAngle + v * layerConfig.spread * Math.sin(u * Math.PI) ** 0.75 + twist;
+  const radius =
+    layerConfig.radius +
+    u * layerConfig.length +
+    edge * edge * layerConfig.curl * (0.08 + tip * 0.28) -
+    layer * 0.012;
+  const cup = (1 - edge * 0.42) * Math.sin(u * Math.PI) * (0.18 + layer * 0.07);
+  const edgeCurl = edge ** 2 * layerConfig.curl * (0.08 + tip * 0.34);
+  const vein = Math.sin((v + 1) * Math.PI * 9 + u * 11 + hash(i * 0.27)) * 0.014 * (1 - edge) * (1 - u * 0.25);
+  const layerBlend = (hash(i * 10.7 + petalIndex * 0.43) - 0.5) * (0.18 - layer * 0.035);
+  const y = layerConfig.y + layerBlend + u * layerConfig.lift - u * u * layerConfig.droop + cup + edgeCurl + vein;
+  const x = Math.cos(theta) * radius;
+  const z = Math.sin(theta) * radius;
+  const rimBoost = rimOnly ? 0.42 : 0;
+
+  return {
+    x,
+    y,
+    z,
+    mix: 0.02 + layer * 0.05 + hash(i * 2.17) * 0.06 + rimBoost * 0.08,
+    glow: (rimOnly ? 0.62 : 0.36) + (1 - u) * 0.08 + tip * 0.12 + rimBoost,
+    kind: rimOnly ? 1 : 0,
+    dirX: Math.cos(theta) * (0.45 + u * 0.75),
+    dirY: 0.14 + u * 0.18,
+    dirZ: Math.sin(theta) * (0.45 + u * 0.75),
+  };
+}
+
+function roseInnerWhorl(local, r, i) {
+  const band = Math.floor(local * 6);
+  const u = hash(i * 4.37) ** 0.62;
+  const side = hash(i * 5.9) > 0.5 ? 1 : -1;
+  const v = side * (0.42 + hash(i * 8.3) * 0.58);
+  const angle = band * 0.78 + u * TAU * (0.62 + band * 0.07) + v * 0.42;
+  const radius = 0.025 + u * (0.12 + band * 0.015) + Math.abs(v) * 0.018;
+  const curl = smoothstep(0.32, 1, u);
+  const x = Math.cos(angle) * radius;
+  const y = 0.35 + band * 0.035 + u * 0.18 + curl * 0.08;
+  const z = Math.sin(angle) * radius;
+
+  return {
+    x,
+    y,
+    z,
+    mix: 0.02 + hash(i * 2.31) * 0.05,
+    glow: 0.62 + curl * 0.18,
+    kind: 1,
+    dirX: Math.cos(angle) * 0.34,
+    dirY: Math.sin(angle) * 0.22,
+    dirZ: 0.48,
   };
 }
 
 function saturnPoint(t, r, i) {
-  if (t < 0.58) {
-    const p = spherePoint(r, t / 0.58, i);
-    return { x: p.x * 0.82, y: p.y * 0.82, z: p.z * 0.82, mix: 0.15 + r * 0.25 };
+  if (t < 0.48) {
+    const p = spherePoint(r, t / 0.48, i);
+    const band = 0.5 + 0.5 * Math.sin((p.y * 6.8 + hash(i * 0.33)) * Math.PI);
+    return {
+      x: p.x * 0.82,
+      y: p.y * 0.68,
+      z: p.z * 0.82,
+      mix: 0.12 + band * 0.22 + hash(i * 1.73) * 0.06,
+      glow: 0.72 + band * 0.2,
+    };
   }
-  const angle = ((t - 0.58) / 0.42) * TAU;
-  const radius = 1.08 + r * 0.62;
-  const tiltY = Math.sin(angle) * radius * 0.22;
-  return {
-    x: Math.cos(angle) * radius,
-    y: tiltY,
-    z: Math.sin(angle) * radius * 0.58 + (hash(i * 12.41) - 0.5) * 0.05,
-    mix: 0.72 + r * 0.28,
-  };
-}
 
-function buddhaPoint(t, r, i) {
-  if (t < 0.16) {
-    const p = spherePoint(r, t / 0.16, i);
-    return { x: p.x * 0.34, y: p.y * 0.34 + 0.72, z: p.z * 0.26, mix: 0.35 };
-  }
-  if (t < 0.42) {
-    const p = spherePoint(r, (t - 0.16) / 0.26, i);
-    return { x: p.x * 0.72, y: p.y * 0.62 - 0.03, z: p.z * 0.32, mix: 0.52 };
-  }
-  if (t < 0.72) {
-    const side = t < 0.57 ? -1 : 1;
-    const local = ((t - 0.42) / 0.3) * Math.PI;
-    return {
-      x: side * (0.25 + Math.sin(local) * 0.98 * Math.sqrt(r)),
-      y: -0.58 + Math.cos(local) * 0.24 * r,
-      z: (hash(i * 10.83) - 0.5) * 0.22,
-      mix: 0.7,
-    };
-  }
-  if (t < 0.9) {
-    const angle = ((t - 0.72) / 0.18) * TAU;
-    const radius = 0.62 + r * 0.18;
-    return {
-      x: Math.cos(angle) * radius,
-      y: Math.sin(angle) * radius + 0.54,
-      z: -0.18,
-      mix: 0.94,
-    };
-  }
-  const angle = ((t - 0.9) / 0.1) * TAU;
-  const radius = 0.45 + r * 0.74;
+  const ringT = (t - 0.48) / 0.52;
+  const bandIndex = Math.floor(ringT * 6);
+  const local = (ringT * 6) % 1;
+  const angle = hash(i * 5.17) * TAU;
+  const gap = bandIndex === 2 ? 0.13 : 0;
+  const radius = 1.05 + bandIndex * 0.16 + local * (0.15 + gap) + r * 0.05;
+  const thickness = (hash(i * 8.23) - 0.5) * (0.035 + bandIndex * 0.005);
+  const tilt = -0.36;
+  const rawY = Math.sin(angle) * radius * 0.16 + thickness;
+  const rawZ = Math.sin(angle) * radius * 0.62;
+  const y = rawY * Math.cos(tilt) - rawZ * Math.sin(tilt);
+  const z = rawY * Math.sin(tilt) + rawZ * Math.cos(tilt);
   return {
     x: Math.cos(angle) * radius,
-    y: -0.92 + Math.sin(angle) * radius * 0.22,
-    z: (hash(i * 8.19) - 0.5) * 0.18,
-    mix: 0.82,
+    y,
+    z,
+    mix: 0.56 + bandIndex * 0.055 + hash(i * 2.17) * 0.1,
+    glow: bandIndex === 2 ? 0.5 : 1.08,
+    dirX: Math.cos(angle) * 1.2,
+    dirY: rawY,
+    dirZ: Math.sin(angle) * 0.72,
   };
 }
 
 function fireworksPoint(t, r, i) {
-  const burst = Math.floor(t * 12);
-  const local = (t * 12) % 1;
-  const phi = Math.acos(2 * hash(i * 9.17) - 1);
-  const theta = TAU * hash(i * 3.31 + burst);
-  const radius = 0.18 + Math.sqrt(local) * (0.5 + hash(burst * 2.7) * 0.95);
-  const centerAngle = (burst / 12) * TAU;
-  const cx = Math.cos(centerAngle) * 0.9;
-  const cy = Math.sin(centerAngle * 1.7) * 0.48;
-  const cz = Math.sin(centerAngle) * 0.4;
+  const type = hash(i * 0.31);
+  const centerPick = hash(i * 0.71);
+  const centerIndex =
+    centerPick < 0.24
+      ? 0
+      : centerPick < 0.46
+        ? 1
+        : centerPick < 0.66
+          ? 2
+          : centerPick < 0.84
+            ? 3
+            : 4;
+  const center = FIREWORK_CENTERS[centerIndex] ?? FIREWORK_CENTERS[0];
+
+  if (type < 0.12) {
+    const trailT = hash(i * 3.41) ** 0.56;
+    const tailWobble = Math.sin(trailT * Math.PI * 2.4 + center.x * 3) * 0.01;
+    const taper = 1 - trailT;
+    return {
+      x: center.x * trailT + tailWobble + (hash(i * 9.3) - 0.5) * 0.006 * taper,
+      y: -1.48 + trailT * (center.y + 1.48),
+      z: center.z * trailT + (hash(i * 7.73) - 0.5) * 0.01 * taper,
+      mix: 0.72 + center.hue * 0.2,
+      glow: 0.28 + trailT * 0.62,
+      kind: 0,
+      dirX: 0,
+      dirY: 0,
+      dirZ: 0,
+    };
+  }
+
+  if (type < 0.18) {
+    const coreRadius = 0.018 + hash(i * 5.7) * 0.06;
+    const coreAngle = hash(i * 2.1) * TAU;
+    const coreDepth = (hash(i * 6.8) - 0.5) * coreRadius;
+    return {
+      x: center.x + Math.cos(coreAngle) * coreRadius,
+      y: center.y + Math.sin(coreAngle) * coreRadius * 0.82,
+      z: center.z + coreDepth,
+      mix: 0.08 + center.hue * 0.36,
+      glow: 1.18,
+      kind: 1,
+      dirX: Math.cos(coreAngle) * (0.18 + hash(i * 3.4) * 0.16),
+      dirY: Math.sin(coreAngle) * (0.16 + hash(i * 5.2) * 0.14),
+      dirZ: (hash(i * 8.2) - 0.5) * 0.22,
+    };
+  }
+
+  const spokeCount = 30 + Math.floor(hash(centerIndex * 17 + i * 0.002) * 16);
+  const spoke = Math.floor(hash(i * 4.61) * spokeCount);
+  const theta = (spoke / spokeCount) * TAU + (hash(i * 8.31) - 0.5) * 0.022;
+  const rayT = hash(i * 3.13) ** 0.72;
+  const split = hash(spoke * 9.17 + i * 0.011);
+  const fork = split > 0.68 ? (split > 0.84 ? -1 : 1) * (0.045 + hash(i * 2.21) * 0.12) : 0;
+  const finalTheta = theta + fork * smoothstep(0.38, 1, rayT);
+  const shell = (0.24 + rayT * (2.35 + hash(i * 2.7) * 0.72)) * center.scale;
+  const ringTightness = 0.9 + Math.sin(spoke * 1.7 + centerIndex) * 0.06;
+  const arc = (hash(i * 6.17) - 0.5) * 0.1;
+  const petalLift = Math.sin(rayT * Math.PI) * (0.12 + hash(i * 4.8) * 0.12);
+  const verticalBias = arc + petalLift;
+  const shimmer = hash(i * 7.19);
+  const coreJitter = 0.012 + hash(i * 9.9) * 0.018;
+
   return {
-    x: cx + radius * Math.sin(phi) * Math.cos(theta),
-    y: cy + radius * Math.cos(phi),
-    z: cz + radius * Math.sin(phi) * Math.sin(theta),
-    mix: r,
+    x: center.x + Math.cos(finalTheta) * coreJitter,
+    y: center.y + Math.sin(finalTheta) * coreJitter * 0.82,
+    z: center.z + (hash(i * 6.1) - 0.5) * coreJitter,
+    mix: 0.12 + ((center.hue + shimmer * 0.46) % 1) * 0.78,
+    glow: 0.64 + (1 - Math.abs(rayT - 0.64)) * 0.28 + shimmer * 0.24,
+    kind: 2,
+    dirX: Math.cos(finalTheta) * shell * ringTightness,
+    dirY: (Math.sin(finalTheta) * 0.98 + verticalBias - rayT * rayT * 0.18) * shell,
+    dirZ: (hash(i * 11.71) - 0.5) * shell * 0.22,
   };
 }
 
@@ -221,6 +740,11 @@ function spherePoint(r, t, i) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function smoothstep(edge0, edge1, value) {
+  const t = clamp((value - edge0) / (edge1 - edge0), 0, 1);
+  return t * t * (3 - 2 * t);
 }
 
 export function hash(value) {

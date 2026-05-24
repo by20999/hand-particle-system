@@ -72,7 +72,16 @@
           </label>
 
           <div class="field theme-field">
+            <span>控制</span>
+            <div class="audio-controls utility-controls">
+              <button id="gestureToggleBtn" class="small-command is-active" type="button">手势</button>
+              <button id="freezeToggleBtn" class="small-command" type="button">静止</button>
+            </div>
+          </div>
+
+          <div class="field theme-field">
             <span>主题</span>
+            <select id="themeSelect" aria-label="主题配色"></select>
             <div id="themeButtons" class="theme-buttons" aria-label="主题配色预设">
               <button class="theme-button" type="button" data-theme="neon" title="霓虹粉蓝">
                 <span class="theme-swatch"></span>
@@ -97,14 +106,83 @@
             </div>
           </div>
 
-          <label class="field">
+          <div class="field theme-field">
+            <span>背景</span>
+            <div id="backgroundButtons" class="theme-buttons compact-buttons" aria-label="背景氛围">
+              <button class="theme-button" type="button" data-background="nebula" title="星云">
+                <span class="mini-icon nebula-icon"></span>
+                <span>星云</span>
+              </button>
+              <button class="theme-button" type="button" data-background="stage" title="柔光舞台">
+                <span class="mini-icon stage-icon"></span>
+                <span>舞台</span>
+              </button>
+              <button class="theme-button" type="button" data-background="minimal" title="极简黑场">
+                <span class="mini-icon minimal-icon"></span>
+                <span>黑场</span>
+              </button>
+              <button class="theme-button" type="button" data-background="fireworks" title="烟花夜空">
+                <span class="mini-icon fireworks-icon"></span>
+                <span>烟花</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="field theme-field">
             <span>模型</span>
-            <select id="shapeSelect">
+            <div id="modelButtons" class="model-buttons" aria-label="模型缩略图">
+              <button class="model-button" type="button" data-model="heart">
+                <span class="model-thumb heart-thumb"></span>
+                <span>爱心</span>
+              </button>
+              <button class="model-button" type="button" data-model="flower">
+                <span class="model-thumb flower-thumb"></span>
+                <span>花朵</span>
+              </button>
+              <button class="model-button" type="button" data-model="saturn">
+                <span class="model-thumb saturn-thumb"></span>
+                <span>土星</span>
+              </button>
+              <button class="model-button" type="button" data-model="fireworks">
+                <span class="model-thumb fireworks-thumb"></span>
+                <span>烟花</span>
+              </button>
+              <button class="model-button" type="button" data-model="text">
+                <span class="model-thumb text-thumb">字</span>
+                <span>文字</span>
+              </button>
+              <button class="model-button more-model-button" type="button" title="更多模型即将加入" disabled>
+                <span class="model-thumb more-thumb"></span>
+                <span>更多</span>
+              </button>
+            </div>
+            <select id="shapeSelect" class="visually-hidden" aria-hidden="true" tabindex="-1">
               <option value="heart">爱心</option>
               <option value="flower">花朵</option>
               <option value="saturn">土星</option>
-              <option value="buddha">佛像</option>
               <option value="fireworks">烟花</option>
+              <option value="text">文字</option>
+            </select>
+          </div>
+
+          <label class="field text-field">
+            <span>文字</span>
+            <span class="text-control">
+              <input id="textInput" type="text" maxlength="18" value="LOVE" />
+              <button id="textApplyBtn" class="small-command" type="button">应用</button>
+            </span>
+          </label>
+
+          <label class="field font-field">
+            <span>字体</span>
+            <select id="textFontSelect">
+              <option value="modern">现代黑体</option>
+              <option value="serif">优雅宋体</option>
+              <option value="rounded">柔和圆体</option>
+              <option value="cinema">电影标题</option>
+              <option value="bubble">圆润泡泡</option>
+              <option value="comic">俏皮动漫</option>
+              <option value="candy">糖果手写</option>
             </select>
           </label>
 
@@ -121,6 +199,19 @@
             </span>
           </label>
 
+          <div class="field theme-field">
+            <span>音乐</span>
+            <div class="audio-controls">
+              <button id="micToggleBtn" class="small-command" type="button">麦克风</button>
+              <label class="file-command">
+                <input id="audioFileInput" type="file" accept="audio/*" />
+                <span>音频</span>
+              </label>
+              <button id="audioStopBtn" class="small-command" type="button">停止</button>
+              <strong id="audioValue">0%</strong>
+            </div>
+          </div>
+
           <div class="hint">
             张开手掌会让粒子在 3D 空间中膨胀散开，收拢会聚回模型。鼠标拖拽旋转视角，滚轮缩放；按住 Shift
             拖动可局部扰动粒子。
@@ -133,6 +224,8 @@
       <button id="panelRestoreBtn" class="floating-panel-button" type="button" title="显示面板" hidden>
         <span aria-hidden="true"></span>
       </button>
+
+      <div id="audioSpectrum" class="audio-spectrum" aria-hidden="true"></div>
     </main>
     <script type="module" src="/src/main.js"></script>
   </body>

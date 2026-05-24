@@ -18,6 +18,13 @@ export function createUI() {
     panelHideBtn: document.querySelector("#panelHideBtn"),
     panelRestoreBtn: document.querySelector("#panelRestoreBtn"),
     shapeSelect: document.querySelector("#shapeSelect"),
+    modelButtons: [...document.querySelectorAll("[data-model]")],
+    textInput: document.querySelector("#textInput"),
+    textApplyBtn: document.querySelector("#textApplyBtn"),
+    textFontSelect: document.querySelector("#textFontSelect"),
+    themeSelect: document.querySelector("#themeSelect"),
+    gestureToggleBtn: document.querySelector("#gestureToggleBtn"),
+    freezeToggleBtn: document.querySelector("#freezeToggleBtn"),
     colorPicker: document.querySelector("#colorPicker"),
     fullscreenBtn: document.querySelector("#fullscreenBtn"),
     statusText: document.querySelector("#statusText"),
@@ -32,6 +39,12 @@ export function createUI() {
     sensitivity: document.querySelector("#sensitivity"),
     sensitivityValue: document.querySelector("#sensitivityValue"),
     themeButtons: [...document.querySelectorAll("[data-theme]")],
+    backgroundButtons: [...document.querySelectorAll("[data-background]")],
+    micToggleBtn: document.querySelector("#micToggleBtn"),
+    audioFileInput: document.querySelector("#audioFileInput"),
+    audioStopBtn: document.querySelector("#audioStopBtn"),
+    audioValue: document.querySelector("#audioValue"),
+    audioSpectrum: document.querySelector("#audioSpectrum"),
   };
 
   initIcons(refs);
@@ -40,6 +53,8 @@ export function createUI() {
   initPanelCollapse(refs);
   initPanelVisibility(refs);
   initSensitivity(refs);
+  initTextFont(refs);
+  initAudioSpectrum(refs);
 
   return {
     refs,
@@ -47,8 +62,18 @@ export function createUI() {
     setDiagnostic: (text) => setDiagnostic(refs, text),
     setQuality: (profile) => setQuality(refs, profile),
     setThemeActive: (themeId) => setThemeActive(refs, themeId),
+    setGestureControlActive: (active) => setGestureControlActive(refs, active),
+    setFreezeActive: (active) => setFreezeActive(refs, active),
+    setBackgroundActive: (mode) => setBackgroundActive(refs, mode),
+    getBackgroundMode: () => safeReadStorage("backgroundMode") ?? "nebula",
+    saveBackgroundMode: (mode) => safeWriteStorage("backgroundMode", mode),
+    setModelActive: (model) => setModelActive(refs, model),
     getThemeId: () => safeReadStorage("themeId") ?? "neon",
     saveThemeId: (themeId) => safeWriteStorage("themeId", themeId),
+    getCustomText: () => normalizeCustomText(refs.textInput.value),
+    getTextFontId: () => refs.textFontSelect?.value ?? "modern",
+    setAudioActive: (mode) => setAudioActive(refs, mode),
+    updateAudioLevel: (level) => updateAudioLevel(refs, level),
     getSensitivity: () => Number(refs.sensitivity.value) / 100,
     updateSensitivityLabel: () => updateSensitivityLabel(refs),
     updatePerformance: (stats) => updatePerformance(refs, stats),
@@ -65,6 +90,17 @@ function initIcons(refs) {
 }
 
 function initThemeButtons(refs) {
+  if (refs.themeSelect) {
+    refs.themeSelect.replaceChildren(
+      ...THEMES.map((theme) => {
+        const option = document.createElement("option");
+        option.value = theme.id;
+        option.textContent = theme.label;
+        return option;
+      }),
+    );
+  }
+
   for (const button of refs.themeButtons) {
     const theme = THEMES.find((item) => item.id === button.dataset.theme);
     if (!theme) continue;
@@ -145,6 +181,29 @@ function initSensitivity(refs) {
   });
 }
 
+function initTextFont(refs) {
+  if (!refs.textFontSelect) return;
+  const saved = safeReadStorage("textFontId");
+  if (saved && [...refs.textFontSelect.options].some((option) => option.value === saved)) {
+    refs.textFontSelect.value = saved;
+  }
+
+  refs.textFontSelect?.addEventListener("change", () => {
+    safeWriteStorage("textFontId", refs.textFontSelect.value);
+  });
+}
+
+function initAudioSpectrum(refs) {
+  if (!refs.audioSpectrum) return;
+  refs.audioBars = [];
+  for (let i = 0; i < 56; i += 1) {
+    const bar = document.createElement("span");
+    bar.style.setProperty("--bar-index", String(i));
+    refs.audioSpectrum.append(bar);
+    refs.audioBars.push(bar);
+  }
+}
+
 function updateSensitivityLabel(refs) {
   refs.sensitivityValue.textContent = `${Math.round(Number(refs.sensitivity.value))}%`;
 }
@@ -167,8 +226,72 @@ function setQuality(refs, profile) {
 }
 
 function setThemeActive(refs, themeId) {
+  if (refs.themeSelect && themeId) {
+    refs.themeSelect.value = themeId;
+  }
   for (const button of refs.themeButtons) {
     button.classList.toggle("is-active", button.dataset.theme === themeId);
+  }
+}
+
+function setBackgroundActive(refs, mode) {
+  for (const button of refs.backgroundButtons) {
+    button.classList.toggle("is-active", button.dataset.background === mode);
+  }
+}
+
+function setModelActive(refs, model) {
+  refs.shapeSelect.value = model;
+  for (const button of refs.modelButtons) {
+    button.classList.toggle("is-active", button.dataset.model === model);
+  }
+}
+
+function setAudioActive(refs, mode) {
+  refs.micToggleBtn.classList.toggle("is-active", mode === "mic");
+  refs.audioStopBtn.classList.toggle("is-active", mode === "off");
+  refs.audioSpectrum?.classList.toggle("is-active", mode !== "off");
+}
+
+function setGestureControlActive(refs, active) {
+  refs.gestureToggleBtn?.classList.toggle("is-active", active);
+  if (refs.gestureToggleBtn) {
+    refs.gestureToggleBtn.textContent = active ? "手势" : "手势关";
+  }
+  refs.video?.classList.toggle("is-disabled", !active);
+}
+
+function setFreezeActive(refs, active) {
+  refs.freezeToggleBtn?.classList.toggle("is-active", active);
+  if (refs.freezeToggleBtn) {
+    refs.freezeToggleBtn.textContent = active ? "继续" : "静止";
+  }
+}
+
+function updateAudioLevel(refs, audio) {
+  const level = typeof audio === "number" ? audio : (audio?.level ?? 0);
+  const beat = typeof audio === "number" ? 0 : (audio?.beat ?? 0);
+  const bars = typeof audio === "number" ? [] : (audio?.bars ?? []);
+  refs.audioValue.textContent = `${Math.round(level * 100)}%`;
+  refs.audioSpectrum?.style.setProperty("--audio-level", level.toFixed(3));
+  refs.audioSpectrum?.style.setProperty("--audio-beat", beat.toFixed(3));
+  refs.audioSpectrum?.style.setProperty("--audio-glow", `${Math.round(10 + beat * 22)}px`);
+  refs.audioSpectrum?.style.setProperty("--audio-halo-opacity", String(0.34 + level * 0.42 + beat * 0.1));
+
+  if (refs.audioBars) {
+    for (let i = 0; i < refs.audioBars.length; i += 1) {
+      const centerDistance = Math.abs((i + 0.5) / refs.audioBars.length - 0.5) * 2;
+      const sourceIndex = Math.floor(centerDistance ** 1.55 * Math.max(0, bars.length - 1));
+      const source = bars.length > 0 ? bars[sourceIndex] : 0;
+      const centerLift = 1 - centerDistance;
+      const height = Math.max(0.08, Math.min(0.88, source * (0.78 + centerLift * 0.18) + beat * 0.045));
+      refs.audioBars[i].style.transform = `scaleY(${height.toFixed(3)})`;
+      refs.audioBars[i].style.opacity = String(0.22 + height * 0.78);
+    }
+  }
+
+  if (refs.audioSpectrum) {
+    refs.audioSpectrum.classList.toggle("has-signal", level > 0.025 || beat > 0.05);
   }
 }
 
@@ -197,6 +320,11 @@ function safeWriteStorage(key, value) {
   } catch {
     // Local storage can be unavailable in strict privacy modes.
   }
+}
+
+function normalizeCustomText(text) {
+  const trimmed = String(text ?? "").trim();
+  return trimmed.length > 0 ? trimmed.slice(0, 18) : "LOVE";
 }
 
 function renderIcon(target, iconNode) {

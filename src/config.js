@@ -6,7 +6,7 @@ const QUALITY_PROFILES = {
   compact: {
     id: "compact",
     label: "移动端",
-    particleCount: 44000,
+    particleCount: 96000,
     maxPixelRatio: 1.45,
     modelComplexity: 0,
     video: { width: 640, height: 360 },
@@ -15,7 +15,7 @@ const QUALITY_PROFILES = {
   balanced: {
     id: "balanced",
     label: "均衡",
-    particleCount: 62000,
+    particleCount: 150000,
     maxPixelRatio: 1.75,
     modelComplexity: 1,
     video: { width: 800, height: 450 },
@@ -24,7 +24,7 @@ const QUALITY_PROFILES = {
   desktop: {
     id: "desktop",
     label: "桌面高画质",
-    particleCount: 76000,
+    particleCount: 220000,
     maxPixelRatio: 2,
     modelComplexity: 1,
     video: { width: 960, height: 540 },
@@ -33,7 +33,7 @@ const QUALITY_PROFILES = {
   ultra: {
     id: "ultra",
     label: "超高画质",
-    particleCount: 92000,
+    particleCount: 300000,
     maxPixelRatio: 2,
     modelComplexity: 1,
     video: { width: 960, height: 540 },
