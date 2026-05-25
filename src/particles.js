@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { MODEL_SCALE, START_SCALE } from "./config.js";
-import { writeShapeTargets, writeTextTargets } from "./shapes.js";
+import { writePointCloudTargets, writeShapeTargets, writeTextTargets } from "./shapes.js";
 
 export function createParticleSystem({ count, color, accent = "#52d7de", pixelRatio }) {
   const geometry = new THREE.BufferGeometry();
@@ -9,12 +9,16 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
   const velocities = new Float32Array(count * 3);
   const randomness = new Float32Array(count);
   const colorMixes = new Float32Array(count);
+  const particleParams = new Float32Array(count * 2);
+  const particleColors = new Float32Array(count * 4);
   const brightnesses = new Float32Array(count);
   const baseBrightnesses = new Float32Array(count);
   const targetRadii = new Float32Array(count);
   const targetDirX = new Float32Array(count);
   const targetDirY = new Float32Array(count);
   const targetDirZ = new Float32Array(count);
+  const targetDirections = new Float32Array(count * 3);
+  const targetMeta = new Float32Array(count * 3);
   const targetKinds = new Float32Array(count);
   const wavePhase = new Float32Array(count);
   const wavePhaseY = new Float32Array(count);
@@ -33,6 +37,12 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
     positions[i3 + 2] = (Math.random() - 0.5) * 8;
     randomness[i] = random;
     colorMixes[i] = Math.random();
+    particleParams[i * 2] = randomness[i];
+    particleParams[i * 2 + 1] = colorMixes[i];
+    particleColors[i3] = 1;
+    particleColors[i3 + 1] = 1;
+    particleColors[i3 + 2] = 1;
+    particleColors[i3 + 3] = 1;
     brightnesses[i] = 1;
     baseBrightnesses[i] = 1;
     targetKinds[i] = 0;
@@ -47,9 +57,13 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
   }
 
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute("aRandom", new THREE.BufferAttribute(randomness, 1));
-  geometry.setAttribute("aColorMix", new THREE.BufferAttribute(colorMixes, 1));
-  geometry.setAttribute("aBrightness", new THREE.BufferAttribute(brightnesses, 1));
+  geometry.setAttribute("aTarget", new THREE.BufferAttribute(targets, 3));
+  geometry.setAttribute("aTargetDir", new THREE.BufferAttribute(targetDirections, 3));
+  geometry.setAttribute("aTargetMeta", new THREE.BufferAttribute(targetMeta, 3));
+  geometry.setAttribute("aParticleParams", new THREE.BufferAttribute(particleParams, 2));
+  geometry.setAttribute("aParticleColor", new THREE.BufferAttribute(particleColors, 4));
+  geometry.setAttribute("aWavePhase", new THREE.BufferAttribute(wavePhase, 1));
+  geometry.setAttribute("aDepthSign", new THREE.BufferAttribute(depthSigns, 1));
 
   const material = new THREE.ShaderMaterial({
     transparent: true,
@@ -61,25 +75,129 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
       uAccent: { value: new THREE.Color(accent) },
       uPixelRatio: { value: pixelRatio },
       uPointSize: { value: 30 },
+      uModelScale: { value: MODEL_SCALE * 0.72 },
+      uShapeGesture: { value: 0 },
+      uDiffusion: { value: 0.05 },
+      uRadialExpansion: { value: 0 },
+      uDepthExpansion: { value: 0 },
+      uTransitionBoost: { value: 0 },
+      uMusicImpact: { value: 0 },
+      uMusicTransient: { value: 0 },
+      uMusicShimmer: { value: 0 },
+      uFireworkExplosion: { value: 0 },
+      uModelType: { value: 0 },
+      uPointer: { value: new THREE.Vector3(0, 0, 0) },
+      uUseVertexColor: { value: 0 },
     },
     vertexShader: `
-      attribute float aRandom;
-      attribute float aColorMix;
-      attribute float aBrightness;
+      attribute vec3 aTarget;
+      attribute vec3 aTargetDir;
+      attribute vec3 aTargetMeta;
+      attribute vec4 aParticleColor;
+      attribute vec2 aParticleParams;
+      attribute float aWavePhase;
+      attribute float aDepthSign;
       varying float vRandom;
       varying float vColorMix;
       varying float vBrightness;
+      varying vec4 vParticleColor;
       uniform float uTime;
       uniform float uPixelRatio;
       uniform float uPointSize;
+      uniform float uModelScale;
+      uniform float uShapeGesture;
+      uniform float uDiffusion;
+      uniform float uRadialExpansion;
+      uniform float uDepthExpansion;
+      uniform float uTransitionBoost;
+      uniform float uMusicImpact;
+      uniform float uMusicTransient;
+      uniform float uMusicShimmer;
+      uniform float uFireworkExplosion;
+      uniform float uModelType;
+      uniform vec3 uPointer;
+
+      float smooth01(float value) {
+        float x = clamp(value, 0.0, 1.0);
+        return x * x * (3.0 - 2.0 * x);
+      }
 
       void main() {
+        float aRandom = aParticleParams.x;
         vRandom = aRandom;
-        vColorMix = aColorMix;
-        vBrightness = aBrightness;
-        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        vColorMix = aParticleParams.y;
+        vParticleColor = aParticleColor;
+        float targetRadius = aTargetMeta.x;
+        float targetKind = aTargetMeta.y;
+        float baseBrightness = aTargetMeta.z;
+        float radialWeight = 0.28 + aRandom * 1.25;
+        float depthWeight = 0.18 + aRandom * 0.82;
+        float waveY = aWavePhase * 1.37 + aRandom * 4.881;
+        float waveZ = aWavePhase * 0.77 + aRandom * 7.417;
+        float rx = sin(uTime * 0.71 + aWavePhase) * 0.5;
+        float ry = sin(uTime * 1.13 + waveY) * 0.5;
+        float rz = sin(uTime * 1.67 + waveZ) * 0.5;
+        vec3 target = vec3(
+          aTarget.x * uModelScale + aTargetDir.x * uRadialExpansion * radialWeight + rx * uDiffusion,
+          aTarget.y * uModelScale + aTargetDir.y * uRadialExpansion * radialWeight + ry * uDiffusion,
+          aTarget.z * uModelScale * (1.0 + uShapeGesture * 2.2) +
+            aTargetDir.z * uRadialExpansion * radialWeight +
+            uDepthExpansion * aDepthSign * depthWeight +
+            rz * uDiffusion * 1.35
+        );
+        float brightness = baseBrightness;
+
+        if (abs(uModelType - 3.0) < 0.5) {
+          float burst = smooth01(uFireworkExplosion);
+          float launchDrift = (1.0 - burst) * (0.034 + aRandom * 0.035);
+          float fireworkScale = ${MODEL_SCALE.toFixed(8)} * (0.94 + uTransitionBoost * 0.08);
+          float sparkDelay = aRandom * 0.16;
+          float sparkBurst = smooth01((burst - sparkDelay) / max(0.001, 1.0 - sparkDelay));
+          float rayDistance = targetRadius * (1.98 + uFireworkExplosion * 0.66 + uMusicTransient * 0.16);
+          float rocketLift = sin(uTime * (0.82 + aRandom * 0.22) + waveY) * launchDrift;
+          if (targetKind < 0.5) {
+            target = vec3(
+              aTarget.x * fireworkScale + sin(uTime * 1.9 + aWavePhase) * launchDrift * 0.34,
+              aTarget.y * fireworkScale + rocketLift * (1.0 - burst * 0.55),
+              aTarget.z * fireworkScale + cos(uTime * 1.4 + waveZ) * launchDrift * 0.26
+            );
+            brightness = baseBrightness * (0.96 + (1.0 - burst) * 0.82 + uMusicShimmer * 0.32);
+          } else if (targetKind < 1.5) {
+            float flash = sin(3.14159265 * clamp(burst, 0.0, 1.0));
+            float coreFade = pow(1.0 - burst, 2.4);
+            float coreScatter = targetRadius * (0.34 + aRandom * 0.32) * burst;
+            target = vec3(
+              aTarget.x * fireworkScale + aTargetDir.x * coreScatter,
+              aTarget.y * fireworkScale + aTargetDir.y * coreScatter - burst * burst * 0.18 + rocketLift * 0.16,
+              aTarget.z * fireworkScale + aTargetDir.z * coreScatter
+            );
+            brightness = baseBrightness * (0.08 + coreFade * 0.92 + flash * 0.56);
+          } else {
+            float afterglow = 0.9 + sin(uTime * 3.4 + aWavePhase) * 0.05;
+            float flutter = sin(uTime * (3.4 + aRandom * 1.8) + aWavePhase) * sparkBurst * 0.065;
+            float branchFlutter = sin(uTime * (4.0 + aRandom * 2.2) + waveZ) * sparkBurst * 0.1;
+            float gravity = sparkBurst * sparkBurst * (0.08 + aRandom * 0.22);
+            float petalTrace = 0.42 + sparkBurst * 0.58;
+            target = vec3(
+              aTarget.x * fireworkScale + aTargetDir.x * rayDistance * petalTrace * afterglow + flutter,
+              aTarget.y * fireworkScale + aTargetDir.y * rayDistance * petalTrace * afterglow - gravity * 1.28 +
+                cos(uTime * 2.6 + waveY) * sparkBurst * 0.045,
+              aTarget.z * fireworkScale + aTargetDir.z * rayDistance * petalTrace + branchFlutter +
+                sin(uTime * 1.8 + waveZ) * sparkBurst * 0.035
+            );
+            brightness = baseBrightness *
+              (0.52 + sparkBurst * (1.95 + uMusicShimmer * 0.72) + sin(rayDistance * 2.1 + uTime * 7.0) * 0.16);
+          }
+        }
+
+        vec3 scatter = normalize(position + vec3(aRandom * 0.7 + 0.1, aDepthSign * 0.4, radialWeight * 0.25));
+        target += scatter * uTransitionBoost * (1.2 + aRandom * 1.6);
+        target += uPointer * (0.55 + aRandom * 0.45);
+
+        vBrightness = brightness;
+        vec4 mvPosition = modelViewMatrix * vec4(target, 1.0);
         float pulse = 0.78 + 0.22 * sin(uTime * 2.0 + aRandom * 8.0);
-        float sizeBrightness = 0.62 + clamp(vBrightness, 0.08, 1.8) * 0.28;
+        float sizeBrightness = 0.62 + clamp(vBrightness, 0.08, 2.2) * 0.28;
         gl_PointSize = uPointSize * pulse * sizeBrightness * uPixelRatio / max(0.45, -mvPosition.z);
         gl_Position = projectionMatrix * mvPosition;
       }
@@ -88,18 +206,22 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
       varying float vRandom;
       varying float vColorMix;
       varying float vBrightness;
+      varying vec4 vParticleColor;
       uniform vec3 uColor;
       uniform vec3 uAccent;
+      uniform float uUseVertexColor;
 
       void main() {
         vec2 uv = gl_PointCoord - vec2(0.5);
         float d = length(uv);
         float alpha = smoothstep(0.5, 0.0, d);
         float core = smoothstep(0.18, 0.0, d);
-        vec3 color = mix(uColor, uAccent, vColorMix * 0.55);
+        vec3 palette = mix(uColor, uAccent, vColorMix * 0.55);
+        vec3 color = mix(palette, vParticleColor.rgb, uUseVertexColor);
         color += core * 0.85;
         color *= vBrightness;
-        gl_FragColor = vec4(color, alpha * (0.72 + vRandom * 0.38) * clamp(vBrightness, 0.25, 1.65));
+        float vertexAlpha = mix(1.0, vParticleColor.a, uUseVertexColor);
+        gl_FragColor = vec4(color, alpha * vertexAlpha * (0.72 + vRandom * 0.38) * clamp(vBrightness, 0.25, 1.65));
       }
     `,
   });
@@ -116,12 +238,16 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
     velocities,
     randomness,
     colorMixes,
+    particleParams,
+    particleColors,
     brightnesses,
     baseBrightnesses,
     targetRadii,
     targetDirX,
     targetDirY,
     targetDirZ,
+    targetDirections,
+    targetMeta,
     targetKinds,
     wavePhase,
     wavePhaseY,
@@ -131,6 +257,7 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
     depthWeights,
     swirlWeights,
     pointerPhase,
+    gpuDriven: true,
   };
 }
 
@@ -138,12 +265,24 @@ export function setParticleTargets(particles, model) {
   particles.currentModel = model;
   if (model === "text") {
     writeTextTargets(particles.customText, particles, particles.textFont);
+  } else if (model === "image") {
+    writePointCloudTargets(particles.customImagePoints, particles);
+  } else if (model === "mesh") {
+    writePointCloudTargets(particles.customMeshPoints, particles);
   } else {
     writeShapeTargets(model, particles);
   }
-  particles.geometry.attributes.aColorMix.needsUpdate = true;
-  particles.geometry.attributes.aBrightness.needsUpdate = true;
+  syncTargetDirectionAttribute(particles);
+  syncParticleParamsAttribute(particles);
+  particles.geometry.attributes.aTarget.needsUpdate = true;
+  particles.geometry.attributes.aTargetDir.needsUpdate = true;
+  particles.geometry.attributes.aTargetMeta.needsUpdate = true;
+  particles.geometry.attributes.aParticleParams.needsUpdate = true;
+  particles.geometry.attributes.aParticleColor.needsUpdate = true;
+  particles.material.uniforms.uUseVertexColor.value = model === "image" || model === "mesh" ? 1 : 0;
   particles.baseBrightnesses.set(particles.brightnesses);
+  syncTargetMetaAttribute(particles);
+  particles.geometry.attributes.aTargetMeta.needsUpdate = true;
 }
 
 export function setCustomText(particles, text, fontId = particles.textFont ?? "modern") {
@@ -159,7 +298,20 @@ export function setTextFont(particles, fontId) {
   }
 }
 
+export function setImagePoints(particles, points) {
+  particles.customImagePoints = points;
+  setParticleTargets(particles, "image");
+}
+
+export function setMeshPoints(particles, points) {
+  particles.customMeshPoints = points;
+  setParticleTargets(particles, "mesh");
+}
+
 export function snapParticlesToTargets(particles) {
+  if (particles.gpuDriven) {
+    return;
+  }
   const { count, positions, targets, velocities, geometry } = particles;
   for (let i = 0; i < count; i += 1) {
     const i3 = i * 3;
@@ -175,30 +327,7 @@ export function snapParticlesToTargets(particles) {
 
 export function updateParticles(particles, state, options) {
   const { delta, elapsed, now, bloomPass, onGestureUpdate } = options;
-  const {
-    count,
-    geometry,
-    material,
-    positions,
-    targets,
-    velocities,
-    randomness,
-    brightnesses,
-    baseBrightnesses,
-    targetRadii,
-    targetDirX,
-    targetDirY,
-    targetDirZ,
-    targetKinds,
-    wavePhase,
-    wavePhaseY,
-    wavePhaseZ,
-    depthSigns,
-    radialWeights,
-    depthWeights,
-    swirlWeights,
-    pointerPhase,
-  } = particles;
+  const { material } = particles;
 
   const gestureSpeed = state.gesture > state.smoothGesture ? 0.52 : 0.42;
   state.smoothGesture = THREE.MathUtils.lerp(state.smoothGesture, state.gesture, gestureSpeed);
@@ -238,7 +367,7 @@ export function updateParticles(particles, state, options) {
   );
   const musicTransient = Math.min(1, musicImpact * 0.38 + Math.max(0, bassLevel - audioLevel * 0.62) * 0.16);
   const musicShimmer = Math.min(1, THREE.MathUtils.smoothstep(trebleLevel, 0.34, 0.88) * 0.62 + midLevel * 0.05);
-  const baseModelScale = isTextModel ? 0.56 : isFireworksModel ? 0.72 : isFlowerModel ? 0.62 : 0.72;
+  const baseModelScale = isTextModel ? 0.62 : isFireworksModel ? 0.72 : isFlowerModel ? 0.62 : 0.72;
   const gestureScale = isTextModel ? 1.72 : isFireworksModel ? 0.22 : 2.38;
   const modelScale = MODEL_SCALE * (baseModelScale + shapeGesture * gestureScale) * (1 + musicTransient * 0.045);
   const diffusion = recovering
@@ -274,137 +403,23 @@ export function updateParticles(particles, state, options) {
   const pointerSwirlBase = (state.pointerDown ? 0.058 : 0.024) * pointerPower;
   const damping = recovering ? 0.58 : pointerActive ? 0.9 : THREE.MathUtils.lerp(0.72, 0.86, shapeGesture);
 
-  for (let i = 0; i < count; i += 1) {
-    const i3 = i * 3;
-    const rx = Math.sin(elapsed * 0.71 + wavePhase[i]) * 0.5;
-    const ry = Math.sin(elapsed * 1.13 + wavePhaseY[i]) * 0.5;
-    const rz = Math.sin(elapsed * 1.67 + wavePhaseZ[i]) * 0.5;
-    const baseX = targets[i3];
-    const baseY = targets[i3 + 1];
-    const baseZ = targets[i3 + 2];
-    const radialPulse = radialExpansion * radialWeights[i];
-    const depthPulse = depthExpansion * depthSigns[i] * depthWeights[i];
-    let tx = baseX * modelScale + targetDirX[i] * radialPulse + rx * diffusion;
-    let ty = baseY * modelScale + targetDirY[i] * radialPulse + ry * diffusion;
-    let tz =
-      baseZ * modelScale * (1.0 + shapeGesture * 2.2) +
-      targetDirZ[i] * radialPulse +
-      depthPulse +
-      rz * diffusion * 1.35;
+  const pointerDirection = state.gestureCommand?.pointing
+    ? new THREE.Vector3(state.gestureCommand.pointX * 0.85, state.gestureCommand.pointY * 0.52, state.gestureCommand.pointZ * 0.36)
+    : new THREE.Vector3(0, 0, 0);
+  material.uniforms.uModelScale.value = modelScale;
+  material.uniforms.uShapeGesture.value = shapeGesture;
+  material.uniforms.uDiffusion.value = diffusion;
+  material.uniforms.uRadialExpansion.value = radialExpansion;
+  material.uniforms.uDepthExpansion.value = depthExpansion;
+  material.uniforms.uTransitionBoost.value = transitionBoost;
+  material.uniforms.uMusicImpact.value = musicImpact;
+  material.uniforms.uMusicTransient.value = musicTransient;
+  material.uniforms.uMusicShimmer.value = musicShimmer;
+  material.uniforms.uFireworkExplosion.value = fireworkExplosion;
+  material.uniforms.uModelType.value = isTextModel ? 4 : isFireworksModel ? 3 : isFlowerModel ? 1 : state.model === "saturn" ? 2 : 0;
+  material.uniforms.uPointer.value.lerp(pointerDirection, 0.18);
 
-    if (isFireworksModel) {
-      const burst = fireworkExplosion * fireworkExplosion * (3 - 2 * fireworkExplosion);
-      const fireworkKind = targetKinds[i] ?? 0;
-      const launchDrift = (1 - burst) * (0.034 + randomness[i] * 0.035);
-      const rocketLift = Math.sin(elapsed * (0.82 + randomness[i] * 0.22) + wavePhaseY[i]) * launchDrift;
-      const fireworkScale = MODEL_SCALE * (0.94 + transitionBoost * 0.08);
-      const sparkDelay = randomness[i] * 0.16;
-      const sparkBurst = THREE.MathUtils.smoothstep(burst, sparkDelay, 1);
-      const rayDistance = targetRadii[i] * (1.98 + fireworkExplosion * 0.66 + musicTransient * 0.16);
-      const flutter = Math.sin(elapsed * (3.4 + randomness[i] * 1.8) + wavePhase[i]) * sparkBurst * 0.065;
-      const gravity = sparkBurst * sparkBurst * (0.08 + randomness[i] * 0.22);
-
-      if (fireworkKind < 0.5) {
-        tx = baseX * fireworkScale + Math.sin(elapsed * 1.9 + wavePhase[i]) * launchDrift * 0.34;
-        ty = baseY * fireworkScale + rocketLift * (1 - burst * 0.55);
-        tz = baseZ * fireworkScale + Math.cos(elapsed * 1.4 + wavePhaseZ[i]) * launchDrift * 0.26;
-        brightnesses[i] = baseBrightnesses[i] * (0.96 + (1 - burst) * 0.82 + musicShimmer * 0.32);
-      } else if (fireworkKind < 1.5) {
-        const flash = Math.sin(Math.PI * THREE.MathUtils.clamp(burst, 0, 1));
-        const coreFade = (1 - burst) ** 2.4;
-        const coreScatter = targetRadii[i] * (0.34 + randomness[i] * 0.32) * burst;
-        tx = baseX * fireworkScale + targetDirX[i] * coreScatter;
-        ty = baseY * fireworkScale + targetDirY[i] * coreScatter - burst * burst * 0.18 + rocketLift * 0.16;
-        tz = baseZ * fireworkScale + targetDirZ[i] * coreScatter;
-        brightnesses[i] = baseBrightnesses[i] * (0.08 + coreFade * 0.92 + flash * 0.56);
-      } else {
-        const afterglow = 0.9 + Math.sin(elapsed * 3.4 + wavePhase[i]) * 0.05;
-        const branchFlutter = Math.sin(elapsed * (4.0 + randomness[i] * 2.2) + wavePhaseZ[i]) * sparkBurst * 0.1;
-        const petalTrace = 0.42 + sparkBurst * 0.58;
-        tx = baseX * fireworkScale + targetDirX[i] * rayDistance * petalTrace * afterglow + flutter;
-        ty =
-          baseY * fireworkScale +
-          targetDirY[i] * rayDistance * petalTrace * afterglow -
-          gravity * 1.28 +
-          Math.cos(elapsed * 2.6 + wavePhaseY[i]) * sparkBurst * 0.045;
-        tz =
-          baseZ * fireworkScale +
-          targetDirZ[i] * rayDistance * petalTrace +
-          branchFlutter +
-          Math.sin(elapsed * 1.8 + wavePhaseZ[i]) * sparkBurst * 0.035;
-        brightnesses[i] =
-          baseBrightnesses[i] *
-          (0.52 + sparkBurst * (1.95 + musicShimmer * 0.72) + Math.sin(rayDistance * 2.1 + elapsed * 7) * 0.16);
-      }
-    } else if (brightnesses[i] !== baseBrightnesses[i]) {
-      brightnesses[i] = THREE.MathUtils.lerp(brightnesses[i], baseBrightnesses[i], 0.18);
-    }
-
-    let px = positions[i3];
-    let py = positions[i3 + 1];
-    let pz = positions[i3 + 2];
-
-    if (recovering) {
-      const settle = 0.24;
-      positions[i3] = THREE.MathUtils.lerp(px, tx, settle);
-      positions[i3 + 1] = THREE.MathUtils.lerp(py, ty, settle);
-      positions[i3 + 2] = THREE.MathUtils.lerp(pz, tz, settle);
-      velocities[i3] *= 0.12;
-      velocities[i3 + 1] *= 0.12;
-      velocities[i3 + 2] *= 0.12;
-      continue;
-    }
-
-    velocities[i3] += (tx - px) * returnStrength * delta;
-    velocities[i3 + 1] += (ty - py) * returnStrength * delta;
-    velocities[i3 + 2] += (tz - pz) * returnStrength * delta;
-
-    const radial = Math.hypot(px, pz) + 0.001;
-    velocities[i3] += (-pz / radial) * swirlStrength * delta * swirlWeights[i];
-    velocities[i3 + 2] += (px / radial) * swirlStrength * delta * swirlWeights[i];
-
-    if (pointerActive) {
-      const dx = px - pointerX;
-      const dy = py - pointerY;
-      const d = Math.hypot(dx, dy) + 0.001;
-
-      if (d < pointerRadius) {
-        const falloff = (1 - d / pointerRadius) ** 2;
-        const repel = pointerRepelBase * falloff;
-        const swirl = pointerSwirlBase * falloff;
-        velocities[i3] += (dx / d) * repel + (-dy / d) * swirl;
-        velocities[i3 + 1] += (dy / d) * repel + (dx / d) * swirl;
-        velocities[i3 + 2] += Math.sin(elapsed * 4 + pointerPhase[i]) * repel * 0.36;
-      }
-    }
-
-    velocities[i3] *= damping;
-    velocities[i3 + 1] *= damping;
-    velocities[i3 + 2] *= damping;
-
-    px += velocities[i3];
-    py += velocities[i3 + 1];
-    pz += velocities[i3 + 2];
-
-    const radius = Math.hypot(px, py, pz);
-    if (radius > 13.5) {
-      const pull = 13.5 / radius;
-      px *= pull;
-      py *= pull;
-      pz *= pull;
-      velocities[i3] *= 0.45;
-      velocities[i3 + 1] *= 0.45;
-      velocities[i3 + 2] *= 0.45;
-    }
-
-    positions[i3] = px;
-    positions[i3 + 1] = py;
-    positions[i3 + 2] = pz;
-  }
-
-  geometry.attributes.position.needsUpdate = true;
-  geometry.attributes.aBrightness.needsUpdate = true;
-  const textToneDown = isTextModel ? 0.68 : 1;
+  const textToneDown = isTextModel ? 0.78 : 1;
   bloomPass.strength =
     (0.42 +
       shapeGesture * 0.22 +
@@ -414,9 +429,38 @@ export function updateParticles(particles, state, options) {
       (isFireworksModel ? fireworkExplosion * 0.68 : 0)) *
     textToneDown;
   material.uniforms.uPointSize.value =
-    (isTextModel ? 9.8 : isFireworksModel ? 7.4 : 18) +
-    shapeGesture * (isTextModel ? 1.8 : isFireworksModel ? 1.1 : 5) +
+    (isTextModel ? 12.4 : isFireworksModel ? 7.4 : 18) +
+    shapeGesture * (isTextModel ? 2.4 : isFireworksModel ? 1.1 : 5) +
     musicImpact * (isFireworksModel ? 3.1 : 4.2) +
     (isFireworksModel ? fireworkExplosion * 6.2 : 0);
   onGestureUpdate(Math.round(g * 100));
+}
+
+function syncTargetDirectionAttribute(particles) {
+  const { count, targetDirX, targetDirY, targetDirZ, targetDirections } = particles;
+  for (let i = 0; i < count; i += 1) {
+    const i3 = i * 3;
+    targetDirections[i3] = targetDirX[i];
+    targetDirections[i3 + 1] = targetDirY[i];
+    targetDirections[i3 + 2] = targetDirZ[i];
+  }
+}
+
+function syncTargetMetaAttribute(particles) {
+  const { count, targetRadii, targetKinds, baseBrightnesses, targetMeta } = particles;
+  for (let i = 0; i < count; i += 1) {
+    const i3 = i * 3;
+    targetMeta[i3] = targetRadii[i];
+    targetMeta[i3 + 1] = targetKinds[i];
+    targetMeta[i3 + 2] = baseBrightnesses[i];
+  }
+}
+
+function syncParticleParamsAttribute(particles) {
+  const { count, randomness, colorMixes, particleParams } = particles;
+  for (let i = 0; i < count; i += 1) {
+    const i2 = i * 2;
+    particleParams[i2] = randomness[i];
+    particleParams[i2 + 1] = colorMixes[i];
+  }
 }

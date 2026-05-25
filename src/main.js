@@ -1,17 +1,28 @@
 import "./styles.css";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { createAudioReactor, stopAudioSource, updateAudioReactor, useAudioFile, useMicrophone } from "./audio.js";
 import { applyBackgroundTheme, createBackgroundSystem, setBackgroundMode, updateBackground } from "./backgrounds.js";
 import { MP_HANDS_ASSET_BASE, renderPixelRatio, selectQualityProfile } from "./config.js";
-import { average, calculateHandOpenness, fistViewPose, lerpAngle, normalizeAngle, palmCenter } from "./gestures.js";
+import {
+  average,
+  calculateHandOpenness,
+  classifyGestureCommand,
+  fistViewPose,
+  lerpAngle,
+  normalizeAngle,
+  palmCenter,
+} from "./gestures.js";
 import { applyStaticLightColors, createStaticLightSources, updateStaticLights } from "./lighting.js";
 import {
   createParticleSystem,
   setCustomText,
+  setImagePoints,
+  setMeshPoints,
   setParticleTargets,
   setTextFont,
   snapParticlesToTargets,
@@ -39,6 +50,8 @@ const {
   backgroundButtons,
   micToggleBtn,
   audioFileInput,
+  imageFileInput,
+  meshFileInput,
   audioStopBtn,
 } = ui.refs;
 
@@ -147,6 +160,9 @@ const state = {
   modelTransition: null,
   customText: ui.getCustomText(),
   textFont: ui.getTextFontId(),
+  gestureCommand: { name: "none", pointing: false, pointX: 0, pointY: 0, pointZ: 0 },
+  lastGestureCommand: "none",
+  gestureCommandUntil: 0,
   audioLevel: 0,
   beatPulse: 0,
   audioMotion: null,
@@ -299,6 +315,40 @@ audioFileInput.addEventListener("change", async () => {
   } catch (error) {
     console.error(error);
     ui.setDiagnostic(`音频文件不可用：${error?.message ?? "unknown error"}`);
+  }
+});
+
+imageFileInput?.addEventListener("change", async () => {
+  const [file] = imageFileInput.files ?? [];
+  if (!file) return;
+  try {
+    ui.setDiagnostic(`正在分析 ${file.name}，大图或高粒子档可能需要几秒`);
+    const points = await createImagePointCloud(file, ui.getImageOptions(), particles.count);
+    setImagePoints(particles, points);
+    selectModel("image", true);
+    ui.setDiagnostic(`图片/Logo 已生成 ${points.length} 个采样点，可用手势和音乐驱动`);
+  } catch (error) {
+    console.error(error);
+    ui.setDiagnostic(`图片导入失败：${error?.message ?? "unknown error"}`);
+  } finally {
+    imageFileInput.value = "";
+  }
+});
+
+meshFileInput?.addEventListener("change", async () => {
+  const [file] = meshFileInput.files ?? [];
+  if (!file) return;
+  try {
+    ui.setDiagnostic("正在读取 GLB 并采样模型表面");
+    const points = await createMeshPointCloud(file);
+    setMeshPoints(particles, points);
+    selectModel("mesh", true);
+    ui.setDiagnostic(`GLB 模型已生成 ${points.length} 个 3D 表面采样点`);
+  } catch (error) {
+    console.error(error);
+    ui.setDiagnostic(`GLB 导入失败：${error?.message ?? "unknown error"}`);
+  } finally {
+    meshFileInput.value = "";
   }
 });
 
@@ -480,6 +530,7 @@ function detectHands(now) {
 
   if (hands.length === 0) {
     easeGestureToFallback(now);
+    state.gestureCommand = { name: "none", pointing: false, pointX: 0, pointY: 0, pointZ: 0 };
     state.handMode = "idle";
     state.fistViewActive = false;
     controls.enabled = true;
@@ -512,8 +563,15 @@ function detectHands(now) {
   state.handMode = state.gestureTarget > 0.62 ? "展开" : state.gestureTarget < 0.26 ? "收拢" : "半开";
   const follow = state.gestureTarget > state.gesture ? 0.12 : 0.28;
   state.gesture = THREE.MathUtils.lerp(state.gesture, state.gestureTarget, follow);
+  updateGestureCommand(hands, now);
   updateFistViewControl(hands[0], hands.length);
   updateDiagnostics(hands.length, now);
+}
+
+function updateGestureCommand(hands, now) {
+  const command = classifyGestureCommand(hands);
+  state.gestureCommand = command;
+
 }
 
 async function processVideoFrame() {
@@ -639,10 +697,16 @@ function updateDiagnostics(handCount, now) {
 
   if (handCount > 0) {
     const viewText = state.fistViewActive ? "，拳头视角控制中" : "";
+    const commandText =
+      state.gestureCommand?.name === "point"
+        ? "，食指指向控制中"
+        : state.gestureCommand?.name === "heart"
+          ? "，比心指令"
+          : "";
     ui.setDiagnostic(
       `识别到 ${handCount} 只手，${state.handMode}，目标 ${Math.round(
         state.gestureTarget * 100,
-      )}%，当前 ${Math.round(state.gesture * 100)}%${viewText}，已分析 ${state.resultFrames} 帧`,
+      )}%，当前 ${Math.round(state.gesture * 100)}%${viewText}${commandText}，已分析 ${state.resultFrames} 帧`,
     );
     return;
   }
@@ -661,7 +725,8 @@ function applyTheme(theme) {
   syncParticlePalette();
   scene.fog.color.set(theme.background);
   applyStaticLightColors(staticLights, state.color, state.accent);
-  motionTrail.material.color.set(theme.rim ?? theme.accent);
+  motionTrail.material.color.set(theme.accent ?? theme.rim);
+  motionTrail.tubeMaterial.color.set(theme.accent ?? theme.primary);
   motionTrail.sparkMaterial.uniforms.uColor.value.set(theme.primary ?? theme.accent);
   applyBackgroundTheme(backgroundSystem, theme);
   applyThemeToDocument(theme);
@@ -768,11 +833,11 @@ function updateParticleRig(delta, elapsed, audio) {
     const side = seed % 2 === 0 ? 1 : -1;
     const angle = seed * 2.38 + Math.sin(elapsed * 0.65 + seed) * 1.05;
     const lane = seed % 3 === 0 ? -1 : seed % 3 === 1 ? 0 : 1;
-    const travelX = side * (3.05 + impact * 1.85 + kick * 0.82 + onset * 0.72) * modelMotion;
-    const travelY = (lane * 0.82 + Math.sin(angle * 1.43) * 0.64 + kick * 0.48 - 0.08) * modelMotion;
-    const travelZ = Math.sin(angle) * (0.78 + impact * 0.82 + treble * 0.24) * modelMotion;
-    state.audioRig.anchorX = THREE.MathUtils.clamp(travelX, -4.85, 4.85);
-    state.audioRig.anchorY = THREE.MathUtils.clamp(travelY, -1.85, 1.95);
+    const travelX = side * (3.35 + impact * 2.05 + kick * 0.92 + onset * 0.82) * modelMotion;
+    const travelY = (lane * 0.9 + Math.sin(angle * 1.43) * 0.7 + kick * 0.52 - 0.08) * modelMotion;
+    const travelZ = Math.sin(angle) * (0.86 + impact * 0.92 + treble * 0.28) * modelMotion;
+    state.audioRig.anchorX = THREE.MathUtils.clamp(travelX, -5.35, 5.35);
+    state.audioRig.anchorY = THREE.MathUtils.clamp(travelY, -2.05, 2.15);
     state.audioRig.anchorZ = THREE.MathUtils.clamp(travelZ, -1.45, 1.45);
     state.audioRig.impactX += side * (0.8 + impact * 0.8);
     state.audioRig.impactY += (0.38 + kick * 0.75 + onset * 0.35) * modelMotion;
@@ -801,16 +866,19 @@ function updateParticleRig(delta, elapsed, audio) {
   const targetX =
     state.audioRig.anchorX +
     orbitX +
-    state.audioRig.impactX;
+    state.audioRig.impactX +
+    (state.gestureCommand?.pointing ? state.gestureCommand.pointX * 1.4 : 0);
   const targetY =
     state.audioRig.anchorY +
     orbitY +
     kick * 0.28 * modelMotion +
-    state.audioRig.impactY;
+    state.audioRig.impactY +
+    (state.gestureCommand?.pointing ? state.gestureCommand.pointY * 0.95 : 0);
   const targetZ =
     state.audioRig.anchorZ +
     orbitZ +
-    state.audioRig.impactZ;
+    state.audioRig.impactZ +
+    (state.gestureCommand?.pointing ? state.gestureCommand.pointZ * 0.75 : 0);
   const targetTiltX =
     drive * Math.sin(elapsed * 1.75 + bass * 3.1) * phraseLift * 0.46 + state.audioRig.impactTiltX - targetZ * 0.16;
   const targetTiltZ =
@@ -839,8 +907,8 @@ function updateParticleRig(delta, elapsed, audio) {
 }
 
 function createMotionTrail(theme) {
-  const maxPoints = 38;
-  const particleLayers = 9;
+  const maxPoints = 48;
+  const particleLayers = 34;
   const linePositions = new Float32Array(maxPoints * 3);
   const particlePositions = new Float32Array(maxPoints * particleLayers * 3);
   const particleAges = new Float32Array(maxPoints * particleLayers);
@@ -855,7 +923,14 @@ function createMotionTrail(theme) {
     particleSeeds[i] = Math.random();
   }
   const material = new THREE.LineBasicMaterial({
-    color: theme.rim ?? theme.accent,
+    color: theme.accent ?? theme.rim,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const tubeMaterial = new THREE.MeshBasicMaterial({
+    color: theme.accent ?? theme.primary,
     transparent: true,
     opacity: 0,
     blending: THREE.AdditiveBlending,
@@ -869,7 +944,7 @@ function createMotionTrail(theme) {
       uColor: { value: new THREE.Color(theme.primary ?? theme.accent) },
       uOpacity: { value: 0 },
       uPixelRatio: { value: pixelRatio },
-      uSize: { value: 44 },
+      uSize: { value: 96 },
     },
     vertexShader: `
       attribute float aAge;
@@ -883,8 +958,8 @@ function createMotionTrail(theme) {
         vAge = aAge;
         vSeed = aSeed;
         vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-        float taper = pow(1.0 - clamp(aAge, 0.0, 1.0), 1.35);
-        float sparkle = 0.7 + aSeed * 0.55;
+        float taper = pow(1.0 - clamp(aAge, 0.0, 1.0), 1.02);
+        float sparkle = 0.9 + aSeed * 0.68;
         gl_PointSize = uSize * taper * sparkle * uPixelRatio / max(0.55, -mvPosition.z);
         gl_Position = projectionMatrix * mvPosition;
       }
@@ -898,7 +973,7 @@ function createMotionTrail(theme) {
       void main() {
         vec2 uv = gl_PointCoord - vec2(0.5);
         float d = length(uv);
-        float alpha = smoothstep(0.5, 0.0, d) * pow(1.0 - vAge, 1.45);
+        float alpha = smoothstep(0.5, 0.0, d) * pow(1.0 - vAge, 1.08);
         float core = smoothstep(0.18, 0.0, d);
         vec3 color = uColor * (0.74 + vSeed * 0.36) + core * 0.58;
         gl_FragColor = vec4(color, alpha * uOpacity);
@@ -906,9 +981,10 @@ function createMotionTrail(theme) {
     `,
   });
   const line = new THREE.Line(geometry, material);
+  const tube = new THREE.Mesh(new THREE.BufferGeometry(), tubeMaterial);
   const sparks = new THREE.Points(particleGeometry, sparkMaterial);
   const group = new THREE.Group();
-  group.add(line, sparks);
+  group.add(tube, line, sparks);
   return {
     maxPoints,
     particleLayers,
@@ -919,7 +995,10 @@ function createMotionTrail(theme) {
     geometry,
     particleGeometry,
     material,
+    tube,
+    tubeMaterial,
     sparkMaterial,
+    needsTubeUpdate: false,
     group,
   };
 }
@@ -930,6 +1009,7 @@ function updateMotionTrail(elapsed, audio) {
     state.motionTrail.points.unshift(particles.system.position.clone());
     state.motionTrail.points.length = Math.min(state.motionTrail.points.length, motionTrail.maxPoints);
     state.motionTrail.lastSampleAt = elapsed;
+    motionTrail.needsTubeUpdate = true;
   }
 
   const points = state.motionTrail.points;
@@ -941,13 +1021,13 @@ function updateMotionTrail(elapsed, audio) {
     motionTrail.linePositions[i3 + 2] = source.z;
 
     const age = motionTrail.maxPoints <= 1 ? 1 : i / (motionTrail.maxPoints - 1);
-    const radius = (1 - age) ** 1.2 * (0.34 + Math.min(audio.beat ?? 0, 1) * 0.12);
+    const radius = (1 - age) ** 0.98 * (0.78 + Math.min(audio.beat ?? 0, 1) * 0.26);
     for (let layer = 0; layer < motionTrail.particleLayers; layer += 1) {
       const particleIndex = i * motionTrail.particleLayers + layer;
       const p3 = particleIndex * 3;
       const seed = motionTrail.particleSeeds?.[particleIndex] ?? 0;
       const angle = seed * Math.PI * 2 + layer * 2.399;
-      const spread = radius * (0.22 + (layer / motionTrail.particleLayers) ** 0.72);
+      const spread = radius * (0.24 + (layer / motionTrail.particleLayers) ** 0.62);
       motionTrail.particlePositions[p3] = source.x + Math.cos(angle) * spread;
       motionTrail.particlePositions[p3 + 1] = source.y + Math.sin(angle) * spread * 0.58 + (seed - 0.5) * radius * 0.4;
       motionTrail.particlePositions[p3 + 2] = source.z + Math.sin(angle * 1.7) * spread * 0.42;
@@ -959,14 +1039,39 @@ function updateMotionTrail(elapsed, audio) {
   motionTrail.particleGeometry.attributes.aAge.needsUpdate = true;
   motionTrail.geometry.setDrawRange(0, points.length);
   motionTrail.particleGeometry.setDrawRange(0, points.length * motionTrail.particleLayers);
-  const targetOpacity = active && points.length > 2 ? 0.2 + Math.min(audio.beat ?? 0, 1) * 0.28 : 0;
+  if (points.length > 2 && motionTrail.needsTubeUpdate) {
+    const curve = new THREE.CatmullRomCurve3(points.slice().reverse(), false, "catmullrom", 0.45);
+    const radius = 0.086 + Math.min(audio?.beat ?? 0, 1) * 0.032 + Math.min(audio?.onset ?? 0, 1) * 0.022;
+    const nextGeometry = new THREE.TubeGeometry(curve, Math.min(160, points.length * 4), radius, 12, false);
+    motionTrail.tube.geometry.dispose();
+    motionTrail.tube.geometry = nextGeometry;
+    motionTrail.needsTubeUpdate = false;
+  }
+  const beatPulse = Math.min(audio.beat ?? 0, 1);
+  const onsetPulse = Math.min(audio.onset ?? 0, 1);
+  const shimmer = active ? 0.5 + 0.5 * Math.sin(elapsed * (5.4 + beatPulse * 3.8)) : 0;
+  const trailColor = new THREE.Color(state.theme?.primary ?? "#ffffff").lerp(
+    new THREE.Color(state.theme?.accent ?? "#ffffff"),
+    0.46 + shimmer * 0.28,
+  );
+  const tubeColor = trailColor.clone().lerp(new THREE.Color(state.theme?.rim ?? "#ffffff"), 0.12 + beatPulse * 0.1);
+  motionTrail.material.color.lerp(trailColor, 0.18);
+  motionTrail.tubeMaterial.color.lerp(tubeColor, 0.16);
+  motionTrail.sparkMaterial.uniforms.uColor.value.lerp(trailColor, 0.18);
+  const targetOpacity = active && points.length > 2 ? 0.24 + beatPulse * 0.26 + shimmer * 0.035 : 0;
+  const targetTubeOpacity = active && points.length > 2 ? 0.075 + beatPulse * 0.11 + onsetPulse * 0.045 + shimmer * 0.025 : 0;
   motionTrail.material.opacity = THREE.MathUtils.lerp(motionTrail.material.opacity, targetOpacity, active ? 0.18 : 0.08);
+  motionTrail.tubeMaterial.opacity = THREE.MathUtils.lerp(
+    motionTrail.tubeMaterial.opacity,
+    targetTubeOpacity,
+    active ? 0.2 : 0.08,
+  );
   motionTrail.sparkMaterial.uniforms.uOpacity.value = THREE.MathUtils.lerp(
     motionTrail.sparkMaterial.uniforms.uOpacity.value,
-    active && points.length > 2 ? 0.18 + Math.min(audio.onset ?? 0, 1) * 0.38 : 0,
+    active && points.length > 2 ? 0.42 + onsetPulse * 0.48 + shimmer * 0.08 : 0,
     active ? 0.22 : 0.08,
   );
-  motionTrail.sparkMaterial.uniforms.uSize.value = 46 + Math.min(audio.beat ?? 0, 1) * 20;
+  motionTrail.sparkMaterial.uniforms.uSize.value = 96 + beatPulse * 38 + shimmer * 8;
 }
 
 function updatePerformanceStats(now) {
@@ -996,4 +1101,403 @@ function updatePerformanceStats(now) {
 function hexToGlow(hex, alpha) {
   const color = new THREE.Color(hex);
   return `rgba(${Math.round(color.r * 255)}, ${Math.round(color.g * 255)}, ${Math.round(color.b * 255)}, ${alpha})`;
+}
+
+async function createImagePointCloud(file, options, targetCount) {
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement("canvas");
+  const maxSide = Math.min(760, Math.max(480, Math.round(Math.sqrt(targetCount) * 1.85)));
+  const scale = Math.min(maxSide / bitmap.width, maxSide / bitmap.height, 1);
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close?.();
+
+  const image = context.getImageData(0, 0, canvas.width, canvas.height);
+  const width = canvas.width;
+  const height = canvas.height;
+  const totalPixels = width * height;
+  const grayscale = new Float32Array(totalPixels);
+  const alpha = new Float32Array(totalPixels);
+  const foreground = new Uint8Array(totalPixels);
+  const gradient = new Float32Array(totalPixels);
+  const blurred = new Float32Array(totalPixels);
+  const contourStrength = THREE.MathUtils.clamp(options.contourStrength ?? 0.75, 0, 1);
+  const interiorRatio = THREE.MathUtils.clamp(options.interiorRatio ?? 0.35, 0.2, 0.5);
+  const colorMode = options.colorMode ?? "original";
+  const mono = new THREE.Color(options.monoColor ?? colorPicker.value);
+  const globalAlpha = THREE.MathUtils.clamp(options.globalAlpha ?? 1, 0, 1);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const pixelIndex = y * width + x;
+      const index = pixelIndex * 4;
+      const a = image.data[index + 3] / 255;
+      const r = image.data[index] / 255;
+      const g = image.data[index + 1] / 255;
+      const b = image.data[index + 2] / 255;
+      const luminance = r * 0.2126 + g * 0.7152 + b * 0.0722;
+      alpha[pixelIndex] = a;
+      grayscale[pixelIndex] = luminance;
+    }
+  }
+
+  gaussianBlur3x3(grayscale, blurred, width, height);
+
+  let threshold = 0;
+  let logoPolarity = 1;
+  if (options.logoMode) {
+    threshold = otsuThreshold(blurred, alpha);
+    logoPolarity = chooseLogoPolarity(blurred, alpha, threshold);
+  }
+
+  const candidates = [];
+  const strongGradients = [];
+  let minX = canvas.width;
+  let minY = canvas.height;
+  let maxX = 0;
+  let maxY = 0;
+
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const pixelIndex = y * width + x;
+      if (alpha[pixelIndex] < 0.502) continue;
+      if (options.logoMode && !isLogoForeground(blurred[pixelIndex], threshold, logoPolarity)) continue;
+      foreground[pixelIndex] = 1;
+      const gx =
+        -blurred[pixelIndex - width - 1] -
+        blurred[pixelIndex - 1] * 2 -
+        blurred[pixelIndex + width - 1] +
+        blurred[pixelIndex - width + 1] +
+        blurred[pixelIndex + 1] * 2 +
+        blurred[pixelIndex + width + 1];
+      const gy =
+        -blurred[pixelIndex - width - 1] -
+        blurred[pixelIndex - width] * 2 -
+        blurred[pixelIndex - width + 1] +
+        blurred[pixelIndex + width - 1] +
+        blurred[pixelIndex + width] * 2 +
+        blurred[pixelIndex + width + 1];
+      gradient[pixelIndex] = Math.hypot(gx, gy);
+      strongGradients.push(gradient[pixelIndex]);
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  if (strongGradients.length === 0) {
+    throw new Error("图片没有可采样的不透明像素");
+  }
+
+  strongGradients.sort((a, b) => a - b);
+  const strongEdgeThreshold = strongGradients[Math.floor(strongGradients.length * 0.8)] ?? 0;
+  const maxGradient = strongGradients[strongGradients.length - 1] || 1;
+
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const pixelIndex = y * width + x;
+      if (!foreground[pixelIndex]) continue;
+      const index = pixelIndex * 4;
+      const r0 = image.data[index] / 255;
+      const g0 = image.data[index + 1] / 255;
+      const b0 = image.data[index + 2] / 255;
+      const a0 = image.data[index + 3] / 255;
+      const lum = grayscale[pixelIndex];
+      const edge = gradient[pixelIndex] / maxGradient;
+      const isStrongEdge = gradient[pixelIndex] >= strongEdgeThreshold;
+      const morphologyEdge =
+        options.logoMode &&
+        (foreground[pixelIndex - 1] === 0 ||
+          foreground[pixelIndex + 1] === 0 ||
+          foreground[pixelIndex - width] === 0 ||
+          foreground[pixelIndex + width] === 0);
+      const edgeWeight = isStrongEdge || morphologyEdge ? 1 : edge ** 0.7;
+      const baseWeight = options.logoMode ? interiorRatio : 0.04 + edge * 0.18;
+      const weight = Math.max(
+        isStrongEdge || morphologyEdge ? 1 : 0,
+        baseWeight * (1 - contourStrength) + edgeWeight * contourStrength,
+      );
+      const color = mapImageColor(r0, g0, b0, lum, colorMode, mono);
+      candidates.push({
+        x,
+        y,
+        r: color.r,
+        g: color.g,
+        b: color.b,
+        a: a0 * globalAlpha,
+        luminance: lum,
+        gradient: edge,
+        strong: isStrongEdge || morphologyEdge,
+        weight: Math.max(0.0001, weight),
+      });
+    }
+  }
+
+  if (candidates.length === 0 && options.logoMode) {
+    return createImagePointCloud(file, { ...options, logoMode: false }, targetCount);
+  }
+
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const maxDim = Math.max(maxX - minX, maxY - minY, 1);
+  const target = Math.max(1, targetCount);
+  const selected = weightedSampleCandidates(candidates, target, options.logoMode ? 0.56 : 0.8);
+  return selected.map((point, i) => ({
+      x: ((point.x - centerX) / maxDim) * 2.5,
+      y: -((point.y - centerY) / maxDim) * 2.5,
+      z: (point.a - 0.5) * 0.08 + (point.luminance - 0.5) * 0.06 + (hash01(i * 4.11) - 0.5) * 0.025,
+      r: point.r,
+      g: point.g,
+      b: point.b,
+      a: point.a,
+      mix: THREE.MathUtils.clamp((point.g * 0.45 + point.b * 0.65) / (point.r + point.g + point.b + 0.001), 0, 1),
+      glow: 0.48 + point.a * 0.28 + point.luminance * 0.18 + point.gradient * 0.28,
+      jitter: point.strong ? 0.0015 : 0.0035,
+      kind: point.strong ? 1 : 0,
+    }));
+}
+
+function gaussianBlur3x3(source, target, width, height) {
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const center = y * width + x;
+      if (x === 0 || y === 0 || x === width - 1 || y === height - 1) {
+        target[center] = source[center];
+        continue;
+      }
+      target[center] =
+        (source[center - width - 1] +
+          source[center - width] * 2 +
+          source[center - width + 1] +
+          source[center - 1] * 2 +
+          source[center] * 4 +
+          source[center + 1] * 2 +
+          source[center + width - 1] +
+          source[center + width] * 2 +
+          source[center + width + 1]) /
+        16;
+    }
+  }
+}
+
+function otsuThreshold(values, alpha) {
+  const histogram = new Uint32Array(256);
+  let total = 0;
+  for (let i = 0; i < values.length; i += 1) {
+    if (alpha[i] < 0.502) continue;
+    histogram[Math.round(THREE.MathUtils.clamp(values[i], 0, 1) * 255)] += 1;
+    total += 1;
+  }
+  if (total === 0) return 0.5;
+
+  let sum = 0;
+  for (let i = 0; i < 256; i += 1) {
+    sum += i * histogram[i];
+  }
+
+  let sumBackground = 0;
+  let weightBackground = 0;
+  let bestVariance = -1;
+  let threshold = 128;
+  for (let i = 0; i < 256; i += 1) {
+    weightBackground += histogram[i];
+    if (weightBackground === 0) continue;
+    const weightForeground = total - weightBackground;
+    if (weightForeground === 0) break;
+    sumBackground += i * histogram[i];
+    const meanBackground = sumBackground / weightBackground;
+    const meanForeground = (sum - sumBackground) / weightForeground;
+    const variance = weightBackground * weightForeground * (meanBackground - meanForeground) ** 2;
+    if (variance > bestVariance) {
+      bestVariance = variance;
+      threshold = i;
+    }
+  }
+  return threshold / 255;
+}
+
+function chooseLogoPolarity(values, alpha, threshold) {
+  let dark = 0;
+  let light = 0;
+  for (let i = 0; i < values.length; i += 1) {
+    if (alpha[i] < 0.502) continue;
+    if (values[i] >= threshold) light += 1;
+    else dark += 1;
+  }
+  if (dark === 0) return 1;
+  if (light === 0) return -1;
+  const total = dark + light;
+  const darkRatio = dark / total;
+  const lightRatio = light / total;
+  if (darkRatio > 0.02 && darkRatio < 0.42) return -1;
+  if (lightRatio > 0.02 && lightRatio < 0.42) return 1;
+  return light >= dark ? 1 : -1;
+}
+
+function isLogoForeground(value, threshold, polarity) {
+  return polarity >= 0 ? value >= threshold : value <= threshold;
+}
+
+function mapImageColor(r, g, b, luminance, mode, monoColor) {
+  if (mode === "luminance") {
+    return { r: luminance, g: luminance, b: luminance };
+  }
+  if (mode === "monochrome") {
+    return {
+      r: monoColor.r * luminance,
+      g: monoColor.g * luminance,
+      b: monoColor.b * luminance,
+    };
+  }
+  return { r, g, b };
+}
+
+function weightedSampleCandidates(candidates, targetCount, strongRatio) {
+  if (candidates.length === 0) {
+    throw new Error("图片没有可采样的前景像素");
+  }
+  const strong = candidates.filter((candidate) => candidate.strong);
+  const flat = candidates.filter((candidate) => !candidate.strong);
+  const selected = [];
+  const strongTarget = Math.min(targetCount, Math.round(targetCount * strongRatio));
+  const flatTarget = targetCount - strongTarget;
+
+  if (strong.length > 0 && strong.length <= strongTarget) {
+    selected.push(...strong);
+    selected.push(...weightedPickMany(strong, strongTarget - strong.length, 17.13));
+  } else {
+    selected.push(...weightedPickMany(strong.length > 0 ? strong : candidates, strongTarget, 17.13));
+  }
+  selected.push(...weightedPickMany(flat.length > 0 ? flat : candidates, flatTarget, 29.71));
+
+  while (selected.length < targetCount) {
+    selected.push(candidates[Math.floor(hash01(selected.length * 8.31) * candidates.length)]);
+  }
+  if (selected.length > targetCount) {
+    selected.length = targetCount;
+  }
+  return selected;
+}
+
+function weightedPickMany(candidates, count, seed) {
+  if (count <= 0) return [];
+  const cumulative = new Float32Array(candidates.length);
+  let total = 0;
+  for (let i = 0; i < candidates.length; i += 1) {
+    total += candidates[i].weight;
+    cumulative[i] = total;
+  }
+  const picked = [];
+  for (let i = 0; i < count; i += 1) {
+    const value = hash01(i * seed + count * 0.013) * total;
+    picked.push(candidates[lowerBound(cumulative, value)] ?? candidates[candidates.length - 1]);
+  }
+  return picked;
+}
+
+async function createMeshPointCloud(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const loader = new GLTFLoader();
+    const gltf = await loader.loadAsync(url);
+    gltf.scene.updateMatrixWorld(true);
+    const triangles = [];
+    const box = new THREE.Box3();
+
+    gltf.scene.traverse((object) => {
+      if (!object.isMesh || !object.geometry?.attributes?.position) return;
+      const geometry = object.geometry;
+      const position = geometry.attributes.position;
+      const index = geometry.index;
+      const color = object.material?.color instanceof THREE.Color ? object.material.color : new THREE.Color("#ffffff");
+      const matrix = object.matrixWorld;
+      const a = new THREE.Vector3();
+      const b = new THREE.Vector3();
+      const c = new THREE.Vector3();
+      const count = index ? index.count : position.count;
+      for (let i = 0; i < count; i += 3) {
+        const ia = index ? index.getX(i) : i;
+        const ib = index ? index.getX(i + 1) : i + 1;
+        const ic = index ? index.getX(i + 2) : i + 2;
+        a.fromBufferAttribute(position, ia).applyMatrix4(matrix);
+        b.fromBufferAttribute(position, ib).applyMatrix4(matrix);
+        c.fromBufferAttribute(position, ic).applyMatrix4(matrix);
+        const area = new THREE.Triangle(a, b, c).getArea();
+        if (area <= 0.000001) continue;
+        triangles.push({ a: a.clone(), b: b.clone(), c: c.clone(), area, color: color.clone() });
+        box.expandByPoint(a);
+        box.expandByPoint(b);
+        box.expandByPoint(c);
+      }
+    });
+
+    if (triangles.length === 0) {
+      throw new Error("GLB 中没有可采样的网格表面");
+    }
+
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const normalizer = 2.28 / Math.max(size.x, size.y, size.z, 0.001);
+    const cumulative = [];
+    let totalArea = 0;
+    for (const triangle of triangles) {
+      totalArea += triangle.area;
+      cumulative.push(totalArea);
+    }
+
+    const sampleCount = Math.min(62000, Math.max(14000, triangles.length * 16));
+    const points = [];
+    for (let i = 0; i < sampleCount; i += 1) {
+      const pick = hash01(i * 12.9898) * totalArea;
+      const triangle = triangles[lowerBound(cumulative, pick)] ?? triangles[triangles.length - 1];
+      let u = hash01(i * 78.233);
+      let v = hash01(i * 37.719);
+      if (u + v > 1) {
+        u = 1 - u;
+        v = 1 - v;
+      }
+      const w = 1 - u - v;
+      const point = new THREE.Vector3()
+        .addScaledVector(triangle.a, u)
+        .addScaledVector(triangle.b, v)
+        .addScaledVector(triangle.c, w)
+        .sub(center)
+        .multiplyScalar(normalizer);
+      const colorTotal = triangle.color.r + triangle.color.g + triangle.color.b + 0.001;
+      points.push({
+        x: point.x,
+        y: point.y,
+        z: point.z,
+        r: triangle.color.r,
+        g: triangle.color.g,
+        b: triangle.color.b,
+        a: 1,
+        mix: THREE.MathUtils.clamp((triangle.color.g * 0.45 + triangle.color.b * 0.65) / colorTotal, 0, 1),
+        glow: 0.54 + hash01(i * 5.91) * 0.28,
+        jitter: 0.004,
+      });
+    }
+    return points;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function lowerBound(values, target) {
+  let low = 0;
+  let high = values.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (values[mid] < target) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
+function hash01(value) {
+  return Math.abs(Math.sin(value * 43758.5453)) % 1;
 }

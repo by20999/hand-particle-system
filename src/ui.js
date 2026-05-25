@@ -42,6 +42,17 @@ export function createUI() {
     backgroundButtons: [...document.querySelectorAll("[data-background]")],
     micToggleBtn: document.querySelector("#micToggleBtn"),
     audioFileInput: document.querySelector("#audioFileInput"),
+    imageFileInput: document.querySelector("#imageFileInput"),
+    meshFileInput: document.querySelector("#meshFileInput"),
+    imageContour: document.querySelector("#imageContour"),
+    imageContourValue: document.querySelector("#imageContourValue"),
+    imageColorMode: document.querySelector("#imageColorMode"),
+    imageMonoColor: document.querySelector("#imageMonoColor"),
+    imageAlpha: document.querySelector("#imageAlpha"),
+    imageAlphaValue: document.querySelector("#imageAlphaValue"),
+    imageLogoMode: document.querySelector("#imageLogoMode"),
+    imageInteriorRatio: document.querySelector("#imageInteriorRatio"),
+    imageInteriorRatioValue: document.querySelector("#imageInteriorRatioValue"),
     audioStopBtn: document.querySelector("#audioStopBtn"),
     audioValue: document.querySelector("#audioValue"),
     audioSpectrum: document.querySelector("#audioSpectrum"),
@@ -54,6 +65,7 @@ export function createUI() {
   initPanelVisibility(refs);
   initSensitivity(refs);
   initTextFont(refs);
+  initImageOptions(refs);
   initAudioSpectrum(refs);
 
   return {
@@ -72,6 +84,7 @@ export function createUI() {
     saveThemeId: (themeId) => safeWriteStorage("themeId", themeId),
     getCustomText: () => normalizeCustomText(refs.textInput.value),
     getTextFontId: () => refs.textFontSelect?.value ?? "modern",
+    getImageOptions: () => getImageOptions(refs),
     setAudioActive: (mode) => setAudioActive(refs, mode),
     updateAudioLevel: (level) => updateAudioLevel(refs, level),
     getSensitivity: () => Number(refs.sensitivity.value) / 100,
@@ -193,10 +206,40 @@ function initTextFont(refs) {
   });
 }
 
+function initImageOptions(refs) {
+  const update = () => {
+    if (refs.imageContourValue && refs.imageContour) {
+      refs.imageContourValue.textContent = `${Math.round(Number(refs.imageContour.value) * 100)}%`;
+    }
+    if (refs.imageAlphaValue && refs.imageAlpha) {
+      refs.imageAlphaValue.textContent = `${Math.round(Number(refs.imageAlpha.value) * 100)}%`;
+    }
+    if (refs.imageInteriorRatioValue && refs.imageInteriorRatio) {
+      refs.imageInteriorRatioValue.textContent = `${Math.round(Number(refs.imageInteriorRatio.value) * 100)}%`;
+    }
+  };
+
+  for (const input of [refs.imageContour, refs.imageAlpha, refs.imageInteriorRatio]) {
+    input?.addEventListener("input", update);
+  }
+  update();
+}
+
+function getImageOptions(refs) {
+  return {
+    contourStrength: Number(refs.imageContour?.value ?? 0.75),
+    colorMode: refs.imageColorMode?.value ?? "original",
+    monoColor: refs.imageMonoColor?.value ?? "#ff4f8f",
+    globalAlpha: Number(refs.imageAlpha?.value ?? 1),
+    logoMode: Boolean(refs.imageLogoMode?.checked),
+    interiorRatio: Number(refs.imageInteriorRatio?.value ?? 0.35),
+  };
+}
+
 function initAudioSpectrum(refs) {
   if (!refs.audioSpectrum) return;
   refs.audioBars = [];
-  for (let i = 0; i < 56; i += 1) {
+  for (let i = 0; i < 72; i += 1) {
     const bar = document.createElement("span");
     bar.style.setProperty("--bar-index", String(i));
     refs.audioSpectrum.append(bar);
@@ -284,9 +327,11 @@ function updateAudioLevel(refs, audio) {
       const sourceIndex = Math.floor(centerDistance ** 1.55 * Math.max(0, bars.length - 1));
       const source = bars.length > 0 ? bars[sourceIndex] : 0;
       const centerLift = 1 - centerDistance;
-      const height = Math.max(0.08, Math.min(0.88, source * (0.78 + centerLift * 0.18) + beat * 0.045));
+      const height = Math.max(0.06, Math.min(0.82, source * (0.68 + centerLift * 0.16) + beat * 0.035));
+      const hot = Math.max(0, (height - 0.42) / 0.4);
       refs.audioBars[i].style.transform = `scaleY(${height.toFixed(3)})`;
       refs.audioBars[i].style.opacity = String(0.22 + height * 0.78);
+      refs.audioBars[i].style.setProperty("--bar-hot", hot.toFixed(3));
     }
   }
 

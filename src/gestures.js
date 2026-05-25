@@ -56,6 +56,28 @@ export function fistViewPose(hand) {
   };
 }
 
+export function classifyGestureCommand(hands) {
+  if (!Array.isArray(hands) || hands.length === 0) {
+    return { name: "none", pointing: false, pointX: 0, pointY: 0, pointZ: 0 };
+  }
+
+  if (hands.length >= 2 && isHeartGesture(hands[0], hands[1])) {
+    return { name: "heart", pointing: false, pointX: 0, pointY: 0, pointZ: 0 };
+  }
+
+  const first = hands[0];
+  if (isOkGesture(first)) {
+    return { name: "ok", pointing: false, pointX: 0, pointY: 0, pointZ: 0 };
+  }
+
+  const pointing = pointingVector(first);
+  if (pointing.active) {
+    return { name: "point", pointing: true, pointX: pointing.x, pointY: pointing.y, pointZ: pointing.z };
+  }
+
+  return { name: "none", pointing: false, pointX: 0, pointY: 0, pointZ: 0 };
+}
+
 export function normalizeAngle(angle) {
   return Math.atan2(Math.sin(angle), Math.cos(angle));
 }
@@ -82,6 +104,55 @@ function palmCenter3(hand) {
   center.y /= PALM_IDS.length;
   center.z /= PALM_IDS.length;
   return center;
+}
+
+function isHeartGesture(left, right) {
+  const palmA = Math.max(distance3(left[0], left[9]), distance3(left[5], left[17]), 0.045);
+  const palmB = Math.max(distance3(right[0], right[9]), distance3(right[5], right[17]), 0.045);
+  const palm = (palmA + palmB) * 0.5;
+  const indexClose = distance3(left[8], right[8]) / palm;
+  const thumbClose = distance3(left[4], right[4]) / palm;
+  const wristGap = distance3(left[0], right[0]) / palm;
+  return indexClose < 0.72 && thumbClose < 0.82 && wristGap > 1.12 && wristGap < 3.3;
+}
+
+function isOkGesture(hand) {
+  const palm = Math.max(distance3(hand[0], hand[9]), distance3(hand[5], hand[17]), 0.045);
+  const thumbIndex = distance3(hand[4], hand[8]) / palm;
+  const middleOpen = fingerExtended(hand, FINGERS[1], palm);
+  const ringOpen = fingerExtended(hand, FINGERS[2], palm);
+  const pinkyOpen = fingerExtended(hand, FINGERS[3], palm);
+  return thumbIndex < 0.44 && middleOpen > 0.56 && ringOpen > 0.48 && pinkyOpen > 0.42;
+}
+
+function pointingVector(hand) {
+  const palm = Math.max(distance3(hand[0], hand[9]), distance3(hand[5], hand[17]), 0.045);
+  const indexOpen = fingerExtended(hand, FINGERS[0], palm);
+  const middleOpen = fingerExtended(hand, FINGERS[1], palm);
+  const ringOpen = fingerExtended(hand, FINGERS[2], palm);
+  const pinkyOpen = fingerExtended(hand, FINGERS[3], palm);
+  const active = indexOpen > 0.72 && middleOpen < 0.48 && ringOpen < 0.42 && pinkyOpen < 0.42;
+  if (!active) {
+    return { active: false, x: 0, y: 0, z: 0 };
+  }
+
+  const dx = hand[8].x - hand[5].x;
+  const dy = hand[8].y - hand[5].y;
+  const dz = (hand[8].z ?? 0) - (hand[5].z ?? 0);
+  const length = Math.hypot(dx, dy, dz) || 1;
+  return {
+    active: true,
+    x: clamp((dx / length) * 1.4, -1, 1),
+    y: clamp((-dy / length) * 1.35, -1, 1),
+    z: clamp((-dz / length) * 1.4, -1, 1),
+  };
+}
+
+function fingerExtended(hand, finger, palm) {
+  const tipReach = distance3(hand[finger.tip], hand[0]) / palm;
+  const pipReach = distance3(hand[finger.pip], hand[0]) / palm;
+  const angle = jointAngle(hand[finger.mcp], hand[finger.pip], hand[finger.tip]);
+  return smoothClamp((tipReach - pipReach + 0.16) / 0.46) * 0.46 + smoothClamp((angle - 1.7) / 0.9) * 0.54;
 }
 
 function distance3(a, b) {

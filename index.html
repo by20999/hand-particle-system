@@ -151,9 +151,13 @@
                 <span class="model-thumb text-thumb">字</span>
                 <span>文字</span>
               </button>
-              <button class="model-button more-model-button" type="button" title="更多模型即将加入" disabled>
-                <span class="model-thumb more-thumb"></span>
-                <span>更多</span>
+              <button class="model-button" type="button" data-model="image">
+                <span class="model-thumb image-thumb"></span>
+                <span>图片</span>
+              </button>
+              <button class="model-button" type="button" data-model="mesh">
+                <span class="model-thumb mesh-thumb"></span>
+                <span>3D</span>
               </button>
             </div>
             <select id="shapeSelect" class="visually-hidden" aria-hidden="true" tabindex="-1">
@@ -162,6 +166,8 @@
               <option value="saturn">土星</option>
               <option value="fireworks">烟花</option>
               <option value="text">文字</option>
+              <option value="image">图片</option>
+              <option value="mesh">3D</option>
             </select>
           </div>
 
@@ -183,7 +189,70 @@
               <option value="bubble">圆润泡泡</option>
               <option value="comic">俏皮动漫</option>
               <option value="candy">糖果手写</option>
+              <option value="wheat">小麦手写</option>
+              <option value="meow">乐喵圆体</option>
+              <option value="yan">书坊颜体</option>
             </select>
+          </label>
+
+          <div class="field theme-field">
+            <span>导入</span>
+            <div class="audio-controls import-controls">
+              <label class="file-command">
+                <input id="imageFileInput" type="file" accept="image/*" />
+                <span>图片/Logo</span>
+              </label>
+              <label class="file-command">
+                <input id="meshFileInput" type="file" accept=".glb,model/gltf-binary" />
+                <span>GLB模型</span>
+              </label>
+            </div>
+          </div>
+
+          <label class="field image-option-field">
+            <span>轮廓</span>
+            <span class="scale-control">
+              <input id="imageContour" type="range" min="0" max="1" step="0.05" value="0.75" />
+              <strong id="imageContourValue">75%</strong>
+            </span>
+          </label>
+
+          <label class="field image-option-field">
+            <span>图色</span>
+            <select id="imageColorMode">
+              <option value="original">原色</option>
+              <option value="luminance">灰度</option>
+              <option value="monochrome">单色</option>
+            </select>
+          </label>
+
+          <label class="field image-option-field">
+            <span>单色</span>
+            <input id="imageMonoColor" type="color" value="#ff4f8f" />
+          </label>
+
+          <label class="field image-option-field">
+            <span>透明</span>
+            <span class="scale-control">
+              <input id="imageAlpha" type="range" min="0" max="1" step="0.05" value="1" />
+              <strong id="imageAlphaValue">100%</strong>
+            </span>
+          </label>
+
+          <label class="field image-option-field">
+            <span>Logo</span>
+            <span class="toggle-row">
+              <input id="imageLogoMode" type="checkbox" />
+              <span>二值轮廓</span>
+            </span>
+          </label>
+
+          <label class="field image-option-field">
+            <span>内部</span>
+            <span class="scale-control">
+              <input id="imageInteriorRatio" type="range" min="0.2" max="0.5" step="0.05" value="0.35" />
+              <strong id="imageInteriorRatioValue">35%</strong>
+            </span>
           </label>
 
           <label class="field color-field">

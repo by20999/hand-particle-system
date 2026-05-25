@@ -462,6 +462,40 @@ h1 {
   font-size: 18px;
 }
 
+.image-thumb {
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent-primary) 88%, #fff), var(--accent-secondary)),
+    radial-gradient(circle at 28% 30%, #fff 0 8%, transparent 9%);
+  overflow: hidden;
+}
+
+.image-thumb::before {
+  content: "";
+  position: absolute;
+  inset: 8px 5px 5px;
+  clip-path: polygon(0 80%, 34% 42%, 52% 62%, 72% 28%, 100% 82%, 100% 100%, 0 100%);
+  background: color-mix(in srgb, var(--theme-rim) 82%, transparent);
+}
+
+.mesh-thumb {
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent-secondary) 36%, transparent), transparent),
+    rgba(255, 255, 255, 0.08);
+}
+
+.mesh-thumb::before {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  border: 2px solid var(--accent-secondary);
+  transform: skewY(-18deg) rotate(45deg);
+  box-shadow:
+    8px -8px 0 -2px color-mix(in srgb, var(--accent-primary) 76%, transparent),
+    -5px 7px 0 -3px color-mix(in srgb, var(--theme-rim) 76%, transparent);
+}
+
 .more-model-button {
   opacity: 0.56;
   cursor: default;
@@ -522,6 +556,28 @@ h1 {
   align-items: center;
 }
 
+.import-controls {
+  grid-template-columns: 1fr 1fr;
+}
+
+.image-option-field {
+  margin-block: 8px;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  color: #f5f7fb;
+}
+
+.toggle-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-primary);
+}
+
 .small-command,
 .file-command span {
   display: grid;
@@ -566,9 +622,9 @@ h1 {
   align-items: end;
   justify-content: center;
   gap: 5px;
-  width: min(920px, 86vw);
-  height: 118px;
-  padding: 18px 24px 16px;
+  width: min(1280px, 98vw);
+  height: 148px;
+  padding: 22px 28px 18px;
   pointer-events: none;
   opacity: 0;
   transform: translateX(-50%);
@@ -579,7 +635,7 @@ h1 {
   content: "";
   position: absolute;
   inset: auto 0 0;
-  height: 58px;
+  height: 72px;
   border-radius: 999px;
   background:
     radial-gradient(ellipse at 50% 100%, color-mix(in srgb, var(--accent-primary) 26%, transparent), transparent 70%),
@@ -593,8 +649,8 @@ h1 {
   position: absolute;
   left: 50%;
   bottom: 8px;
-  width: min(360px, 48vw);
-  height: 76px;
+  width: min(440px, 58vw);
+  height: 94px;
   border-radius: 999px;
   background:
     radial-gradient(ellipse at 50% 100%, color-mix(in srgb, var(--theme-rim) 22%, transparent), transparent 68%),
@@ -615,7 +671,7 @@ h1 {
 .audio-spectrum span {
   position: relative;
   z-index: 1;
-  width: 9px;
+  width: 10px;
   height: 100%;
   min-height: 8px;
   border-radius: 999px;
@@ -627,8 +683,8 @@ h1 {
       var(--accent-primary)
     );
   box-shadow:
-    0 0 14px color-mix(in srgb, var(--accent-secondary) 46%, transparent),
-    0 0 var(--audio-glow, 8px) color-mix(in srgb, var(--accent-primary) 38%, transparent);
+    0 0 calc(8px + var(--bar-hot, 0) * 18px) color-mix(in srgb, var(--accent-secondary) calc(28% + var(--bar-hot, 0) * 42%), transparent),
+    0 0 calc(var(--audio-glow, 8px) + var(--bar-hot, 0) * 16px) color-mix(in srgb, var(--accent-primary) calc(24% + var(--bar-hot, 0) * 48%), transparent);
   transform: scaleY(0.08);
   transform-origin: bottom;
   transition:
@@ -799,13 +855,13 @@ input[type="color"] {
 
   .audio-spectrum {
     bottom: 10px;
-    width: 92vw;
-    height: 72px;
-    gap: 3px;
-    padding-inline: 12px;
+    width: 98vw;
+    height: 90px;
+    gap: 2px;
+    padding-inline: 10px;
   }
 
   .audio-spectrum span {
-    width: 6px;
+    width: 7px;
   }
 }

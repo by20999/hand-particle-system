@@ -6,7 +6,7 @@ export function createAudioReactor() {
     outputGain: null,
     stream: null,
     data: null,
-    bars: new Array(56).fill(0),
+    bars: new Array(72).fill(0),
     enabled: false,
     level: 0,
     bass: 0,
@@ -165,7 +165,7 @@ function updateBars(reactor) {
       total += reactor.data[j] ?? 0;
     }
     const raw = total / (end - start) / 255;
-    const shaped = Math.pow(clamp(raw * 1.32, 0, 1), 0.78);
+    const shaped = Math.pow(clamp(raw * 1.08, 0, 1), 0.92);
     reactor.bars[i] = reactor.bars[i] * 0.58 + shaped * 0.42;
   }
 }
