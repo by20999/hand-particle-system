@@ -23,6 +23,8 @@ export function createUI() {
     textApplyBtn: document.querySelector("#textApplyBtn"),
     textFontSelect: document.querySelector("#textFontSelect"),
     themeSelect: document.querySelector("#themeSelect"),
+    showPresetSelect: document.querySelector("#showPresetSelect"),
+    showPresetToggleBtn: document.querySelector("#showPresetToggleBtn"),
     gestureToggleBtn: document.querySelector("#gestureToggleBtn"),
     freezeToggleBtn: document.querySelector("#freezeToggleBtn"),
     colorPicker: document.querySelector("#colorPicker"),
@@ -85,6 +87,8 @@ export function createUI() {
     getCustomText: () => normalizeCustomText(refs.textInput.value),
     getTextFontId: () => refs.textFontSelect?.value ?? "modern",
     getImageOptions: () => getImageOptions(refs),
+    getShowPresetId: () => refs.showPresetSelect?.value ?? "auto",
+    setShowPresetActive: (active) => setShowPresetActive(refs, active),
     setAudioActive: (mode) => setAudioActive(refs, mode),
     updateAudioLevel: (level) => updateAudioLevel(refs, level),
     getSensitivity: () => Number(refs.sensitivity.value) / 100,
@@ -308,6 +312,13 @@ function setFreezeActive(refs, active) {
   refs.freezeToggleBtn?.classList.toggle("is-active", active);
   if (refs.freezeToggleBtn) {
     refs.freezeToggleBtn.textContent = active ? "继续" : "静止";
+  }
+}
+
+function setShowPresetActive(refs, active) {
+  refs.showPresetToggleBtn?.classList.toggle("is-active", active);
+  if (refs.showPresetToggleBtn) {
+    refs.showPresetToggleBtn.textContent = active ? "停止" : "巡演";
   }
 }
 

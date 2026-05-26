@@ -41,6 +41,8 @@ const {
   textApplyBtn,
   textFontSelect,
   themeSelect,
+  showPresetSelect,
+  showPresetToggleBtn,
   gestureToggleBtn,
   freezeToggleBtn,
   colorPicker,
@@ -101,6 +103,7 @@ const particles = createParticleSystem({
   color: initialTheme.primary,
   accent: initialTheme.accent,
   pixelRatio,
+  fboSimulation: shouldUseFboSimulation(renderer, qualityProfile),
 });
 scene.add(particles.system);
 
@@ -116,6 +119,46 @@ setBackgroundMode(backgroundSystem, ui.getBackgroundMode(), initialTheme);
 ui.setBackgroundActive(backgroundSystem.mode);
 
 const audioReactor = createAudioReactor();
+let imageWorker = null;
+let imageWorkerJobId = 0;
+const imageWorkerJobs = new Map();
+
+const SHOW_PRESETS = {
+  auto: {
+    label: "自动巡演",
+    steps: [
+      { label: "霓虹爱心", theme: "neon", background: "nebula", model: "heart", duration: 9500 },
+      { label: "玫瑰舞台", theme: "rose", background: "stage", model: "flower", duration: 10500 },
+      { label: "电紫土星", theme: "violet", background: "minimal", model: "saturn", duration: 9500 },
+      { label: "夜空烟花", theme: "laser", background: "fireworks", model: "fireworks", duration: 11000 },
+    ],
+  },
+  romance: {
+    label: "玫瑰告白",
+    steps: [
+      { label: "玫红花朵", theme: "rose", background: "stage", model: "flower", duration: 11500 },
+      { label: "文字告白", theme: "gold", background: "nebula", model: "text", text: "LOVE", duration: 10500 },
+      { label: "暖光爱心", theme: "gold", background: "minimal", model: "heart", duration: 9500 },
+    ],
+  },
+  club: {
+    label: "夜场烟花",
+    steps: [
+      { label: "激光爱心", theme: "laser", background: "stage", model: "heart", duration: 8500 },
+      { label: "电紫土星", theme: "violet", background: "nebula", model: "saturn", duration: 8500 },
+      { label: "爆场烟花", theme: "laser", background: "fireworks", model: "fireworks", duration: 12000 },
+    ],
+  },
+  gallery: {
+    label: "图形展台",
+    steps: [
+      { label: "图片点云", theme: "ice", background: "minimal", model: "image", duration: 10500 },
+      { label: "3D 点云", theme: "blackGold", background: "stage", model: "mesh", duration: 10500 },
+      { label: "文字陈列", theme: "aurora", background: "nebula", model: "text", text: "PARTICLE", duration: 9500 },
+      { label: "土星陈列", theme: "gold", background: "minimal", model: "saturn", duration: 9000 },
+    ],
+  },
+};
 
 const state = {
   model: "heart",
@@ -155,11 +198,16 @@ const state = {
   lastDetectedHandTime: 0,
   lastVideoSendTime: 0,
   lastStatusDetailTime: 0,
+  diagnosticHoldUntil: 0,
   lastErrorMessage: "",
   processingVideo: false,
   modelTransition: null,
   customText: ui.getCustomText(),
   textFont: ui.getTextFontId(),
+  showPreset: ui.getShowPresetId(),
+  showPresetActive: false,
+  showStepIndex: -1,
+  nextShowStepAt: 0,
   gestureCommand: { name: "none", pointing: false, pointX: 0, pointY: 0, pointZ: 0 },
   lastGestureCommand: "none",
   gestureCommandUntil: 0,
@@ -288,6 +336,24 @@ freezeToggleBtn?.addEventListener("click", () => {
   }
 });
 
+showPresetSelect?.addEventListener("change", () => {
+  state.showPreset = ui.getShowPresetId();
+  state.showStepIndex = -1;
+  state.nextShowStepAt = 0;
+  if (state.showPresetActive) {
+    showHeldDiagnostic(`演出预设切换为 ${SHOW_PRESETS[state.showPreset]?.label ?? "自动巡演"}`, 5000);
+  }
+});
+
+showPresetToggleBtn?.addEventListener("click", () => {
+  state.showPresetActive = !state.showPresetActive;
+  state.showPreset = ui.getShowPresetId();
+  state.showStepIndex = -1;
+  state.nextShowStepAt = 0;
+  ui.setShowPresetActive(state.showPresetActive);
+  showHeldDiagnostic(state.showPresetActive ? "演出巡演已启动" : "演出巡演已停止", 5000);
+});
+
 for (const button of backgroundButtons) {
   button.addEventListener("click", () => {
     setBackgroundMode(backgroundSystem, button.dataset.background, state.theme);
@@ -322,14 +388,14 @@ imageFileInput?.addEventListener("change", async () => {
   const [file] = imageFileInput.files ?? [];
   if (!file) return;
   try {
-    ui.setDiagnostic(`正在分析 ${file.name}，大图或高粒子档可能需要几秒`);
-    const points = await createImagePointCloud(file, ui.getImageOptions(), particles.count);
+    showHeldDiagnostic(`正在分析 ${file.name}，大图或高粒子档可能需要几秒`, 60000);
+    const points = await createImagePointCloud(file, ui.getImageOptions(), Math.round(particles.count * 1.22));
     setImagePoints(particles, points);
     selectModel("image", true);
-    ui.setDiagnostic(`图片/Logo 已生成 ${points.length} 个采样点，可用手势和音乐驱动`);
+    showHeldDiagnostic(`图片/Logo 已生成 ${points.length} 个采样点，可用手势和音乐驱动`, 8000);
   } catch (error) {
     console.error(error);
-    ui.setDiagnostic(`图片导入失败：${error?.message ?? "unknown error"}`);
+    showHeldDiagnostic(`图片导入失败：${error?.message ?? "unknown error"}`, 12000);
   } finally {
     imageFileInput.value = "";
   }
@@ -339,14 +405,14 @@ meshFileInput?.addEventListener("change", async () => {
   const [file] = meshFileInput.files ?? [];
   if (!file) return;
   try {
-    ui.setDiagnostic("正在读取 GLB 并采样模型表面");
-    const points = await createMeshPointCloud(file);
+    showHeldDiagnostic("正在读取 GLB 并采样模型表面", 60000);
+    const points = await createMeshPointCloud(file, Math.round(particles.count * 0.65));
     setMeshPoints(particles, points);
     selectModel("mesh", true);
-    ui.setDiagnostic(`GLB 模型已生成 ${points.length} 个 3D 表面采样点`);
+    showHeldDiagnostic(`GLB 模型已生成 ${points.length} 个 3D 表面采样点`, 8000);
   } catch (error) {
     console.error(error);
-    ui.setDiagnostic(`GLB 导入失败：${error?.message ?? "unknown error"}`);
+    showHeldDiagnostic(`GLB 导入失败：${error?.message ?? "unknown error"}`, 12000);
   } finally {
     meshFileInput.value = "";
   }
@@ -423,7 +489,8 @@ window.addEventListener("resize", () => {
 async function initCameraTracking() {
   try {
     ui.setStatus("正在加载手势模型", "idle");
-    const { Hands } = await import("@mediapipe/hands");
+    const handsModule = await import("@mediapipe/hands");
+    const Hands = resolveHandsConstructor(handsModule);
 
     state.hands = new Hands({
       locateFile: (file) => `${MP_HANDS_ASSET_BASE}${file}`,
@@ -475,6 +542,23 @@ async function initCameraTracking() {
   }
 }
 
+function resolveHandsConstructor(module) {
+  const globalScope = typeof globalThis !== "undefined" ? globalThis : undefined;
+  const candidates = [
+    module?.Hands,
+    module?.default?.Hands,
+    module?.default,
+    module?.t?.Hands,
+    module?.["module.exports"]?.Hands,
+    globalScope?.Hands,
+  ];
+  const Hands = candidates.find((candidate) => typeof candidate === "function");
+  if (!Hands) {
+    throw new Error("MediaPipe Hands 模块导出不可用");
+  }
+  return Hands;
+}
+
 function animate() {
   requestAnimationFrame(animate);
 
@@ -494,11 +578,13 @@ function animate() {
   ui.updateAudioLevel(audio);
   particles.material.uniforms.uTime.value = elapsed;
   detectHands(now);
+  updateShowPreset(now);
   updateFireworkExplosion(now);
   updateParticles(particles, state, {
     delta,
     elapsed,
     now,
+    renderer,
     bloomPass,
     onGestureUpdate: ui.updateGestureMeter,
   });
@@ -570,8 +656,32 @@ function detectHands(now) {
 
 function updateGestureCommand(hands, now) {
   const command = classifyGestureCommand(hands);
-  state.gestureCommand = command;
+  if (command.name !== "none") {
+    if (command.pointing && state.gestureCommand?.pointing) {
+      command.pointX = THREE.MathUtils.lerp(state.gestureCommand.pointX, command.pointX, 0.36);
+      command.pointY = THREE.MathUtils.lerp(state.gestureCommand.pointY, command.pointY, 0.36);
+      command.pointZ = THREE.MathUtils.lerp(state.gestureCommand.pointZ, command.pointZ, 0.36);
+    }
+    state.gestureCommand = command;
+    state.lastGestureCommand = command.name;
+    state.gestureCommandUntil = now + (command.pointing ? 220 : 520);
+    return;
+  }
 
+  if (now < state.gestureCommandUntil && state.gestureCommand?.name !== "none") {
+    if (state.gestureCommand.pointing) {
+      state.gestureCommand = {
+        ...state.gestureCommand,
+        pointX: THREE.MathUtils.lerp(state.gestureCommand.pointX, 0, 0.08),
+        pointY: THREE.MathUtils.lerp(state.gestureCommand.pointY, 0, 0.08),
+        pointZ: THREE.MathUtils.lerp(state.gestureCommand.pointZ, 0, 0.08),
+      };
+    }
+    return;
+  }
+
+  state.gestureCommand = command;
+  state.lastGestureCommand = "none";
 }
 
 async function processVideoFrame() {
@@ -675,6 +785,10 @@ function updateDiagnostics(handCount, now) {
   if (now - state.lastStatusDetailTime < 250) return;
   state.lastStatusDetailTime = now;
 
+  if (now < state.diagnosticHoldUntil) {
+    return;
+  }
+
   if (!state.gestureControlEnabled) {
     ui.setDiagnostic("手势控制关闭中；点击“手势关”可恢复摄像头预览和手势输入");
     return;
@@ -717,7 +831,8 @@ function updateDiagnostics(handCount, now) {
   ui.setDiagnostic(`${lastSeen}，请让完整手掌出现在下方预览框中`);
 }
 
-function applyTheme(theme) {
+function applyTheme(theme, options = {}) {
+  const { save = true } = options;
   state.theme = theme;
   state.color.set(theme.primary);
   state.accent.set(theme.accent);
@@ -731,7 +846,57 @@ function applyTheme(theme) {
   applyBackgroundTheme(backgroundSystem, theme);
   applyThemeToDocument(theme);
   ui.setThemeActive(theme.id);
-  ui.saveThemeId(theme.id);
+  if (save) {
+    ui.saveThemeId(theme.id);
+  }
+}
+
+function showHeldDiagnostic(text, duration = 8000) {
+  ui.setDiagnostic(text);
+  state.diagnosticHoldUntil = performance.now() + duration;
+}
+
+function updateShowPreset(now) {
+  if (!state.showPresetActive) return;
+  const preset = SHOW_PRESETS[state.showPreset] ?? SHOW_PRESETS.auto;
+  if (now < state.nextShowStepAt) return;
+
+  const steps = preset.steps;
+  state.showStepIndex = (state.showStepIndex + 1) % steps.length;
+  const step = steps[state.showStepIndex];
+  applyShowStep(step, preset);
+  state.nextShowStepAt = now + (step.duration ?? 10000);
+}
+
+function applyShowStep(step, preset) {
+  if (step.theme) {
+    applyTheme(getTheme(step.theme), { save: false });
+  }
+  if (step.background) {
+    setBackgroundMode(backgroundSystem, step.background, state.theme);
+    ui.setBackgroundActive(backgroundSystem.mode);
+  }
+  if (step.text && textInput) {
+    textInput.value = step.text;
+  }
+
+  const model = resolveShowModel(step.model);
+  selectModel(model, model === "text");
+  if (model === "fireworks") {
+    triggerFireworksBurst();
+  }
+
+  showHeldDiagnostic(`演出：${preset.label} / ${step.label}`, 3600);
+}
+
+function resolveShowModel(model) {
+  if (model === "image" && !particles.customImagePoints?.length) {
+    return "heart";
+  }
+  if (model === "mesh" && !particles.customMeshPoints?.length) {
+    return "saturn";
+  }
+  return model;
 }
 
 function syncParticlePalette() {
@@ -771,6 +936,16 @@ function particlePaletteForModel(model, currentState) {
 function selectModel(model, forceRefresh = false) {
   if (!model) return;
   const normalized = model === "text" ? "text" : model;
+  if (normalized === "image" && !particles.customImagePoints?.length) {
+    showHeldDiagnostic("请先上传图片/Logo，导入后会自动切换到图片粒子", 7000);
+    imageFileInput?.click();
+    return;
+  }
+  if (normalized === "mesh" && !particles.customMeshPoints?.length) {
+    showHeldDiagnostic("请先上传 GLB 模型，导入后会自动切换到 3D 粒子", 7000);
+    meshFileInput?.click();
+    return;
+  }
   if (!forceRefresh && state.model === normalized) return;
 
   state.model = normalized;
@@ -1103,10 +1278,79 @@ function hexToGlow(hex, alpha) {
   return `rgba(${Math.round(color.r * 255)}, ${Math.round(color.g * 255)}, ${Math.round(color.b * 255)}, ${alpha})`;
 }
 
+function shouldUseFboSimulation(activeRenderer, profile) {
+  const gl = activeRenderer.getContext();
+  const isMobileProfile = profile.id === "compact";
+  const hasWebGl2 = activeRenderer.capabilities.isWebGL2;
+  const hasVertexTextures = activeRenderer.capabilities.maxVertexTextures > 0;
+  const hasFloatTargets =
+    Boolean(gl.getExtension?.("EXT_color_buffer_float")) || Boolean(gl.getExtension?.("EXT_color_buffer_half_float"));
+  return hasWebGl2 && hasVertexTextures && hasFloatTargets && !isMobileProfile;
+}
+
 async function createImagePointCloud(file, options, targetCount) {
+  if (supportsImageWorker()) {
+    try {
+      return await createImagePointCloudInWorker(file, options, targetCount);
+    } catch (error) {
+      console.warn(`图片 Worker 采样失败，回退到主线程：${error?.message ?? error}`);
+    }
+  }
+  return createImagePointCloudOnMain(file, options, targetCount);
+}
+
+function supportsImageWorker() {
+  return typeof Worker !== "undefined" && typeof URL !== "undefined";
+}
+
+function createImagePointCloudInWorker(file, options, targetCount) {
+  const worker = getImageWorker();
+  const id = (imageWorkerJobId += 1);
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      imageWorkerJobs.delete(id);
+      reject(new Error("图片采样超时"));
+    }, 60000);
+    imageWorkerJobs.set(id, { resolve, reject, timeout });
+    worker.postMessage({ id, file, options, targetCount });
+  });
+}
+
+function getImageWorker() {
+  if (imageWorker) return imageWorker;
+  imageWorker = new Worker(new URL("./image-worker.js", import.meta.url), { type: "module" });
+  imageWorker.addEventListener("message", (event) => {
+    const { id, points, error } = event.data ?? {};
+    const job = imageWorkerJobs.get(id);
+    if (!job) return;
+    window.clearTimeout(job.timeout);
+    imageWorkerJobs.delete(id);
+    if (error) {
+      job.reject(new Error(error));
+    } else {
+      job.resolve(points);
+    }
+  });
+  imageWorker.addEventListener("error", (event) => {
+    rejectImageWorkerJobs(event.message || "图片 Worker 异常");
+    imageWorker.terminate();
+    imageWorker = null;
+  });
+  return imageWorker;
+}
+
+function rejectImageWorkerJobs(message) {
+  for (const [id, job] of imageWorkerJobs) {
+    window.clearTimeout(job.timeout);
+    job.reject(new Error(message));
+    imageWorkerJobs.delete(id);
+  }
+}
+
+async function createImagePointCloudOnMain(file, options, targetCount) {
   const bitmap = await createImageBitmap(file);
   const canvas = document.createElement("canvas");
-  const maxSide = Math.min(760, Math.max(480, Math.round(Math.sqrt(targetCount) * 1.85)));
+  const maxSide = Math.min(960, Math.max(620, Math.round(Math.sqrt(targetCount) * 2.15)));
   const scale = Math.min(maxSide / bitmap.width, maxSide / bitmap.height, 1);
   canvas.width = Math.max(1, Math.round(bitmap.width * scale));
   canvas.height = Math.max(1, Math.round(bitmap.height * scale));
@@ -1190,6 +1434,9 @@ async function createImagePointCloud(file, options, targetCount) {
   }
 
   if (strongGradients.length === 0) {
+    if (options.logoMode) {
+      return createImagePointCloudOnMain(file, { ...options, logoMode: false }, targetCount);
+    }
     throw new Error("图片没有可采样的不透明像素");
   }
 
@@ -1215,8 +1462,9 @@ async function createImagePointCloud(file, options, targetCount) {
           foreground[pixelIndex + 1] === 0 ||
           foreground[pixelIndex - width] === 0 ||
           foreground[pixelIndex + width] === 0);
-      const edgeWeight = isStrongEdge || morphologyEdge ? 1 : edge ** 0.7;
-      const baseWeight = options.logoMode ? interiorRatio : 0.04 + edge * 0.18;
+      const detailWeight = Math.abs(lum - 0.5) * 0.16 + localContrast(blurred, width, pixelIndex) * 0.22;
+      const edgeWeight = isStrongEdge || morphologyEdge ? 1 : Math.max(edge ** 0.66, detailWeight);
+      const baseWeight = options.logoMode ? interiorRatio : 0.1 + edge * 0.18 + detailWeight;
       const weight = Math.max(
         isStrongEdge || morphologyEdge ? 1 : 0,
         baseWeight * (1 - contourStrength) + edgeWeight * contourStrength,
@@ -1238,27 +1486,37 @@ async function createImagePointCloud(file, options, targetCount) {
   }
 
   if (candidates.length === 0 && options.logoMode) {
-    return createImagePointCloud(file, { ...options, logoMode: false }, targetCount);
+    return createImagePointCloudOnMain(file, { ...options, logoMode: false }, targetCount);
   }
 
   const centerX = (minX + maxX) / 2;
   const centerY = (minY + maxY) / 2;
   const maxDim = Math.max(maxX - minX, maxY - minY, 1);
   const target = Math.max(1, targetCount);
-  const selected = weightedSampleCandidates(candidates, target, options.logoMode ? 0.56 : 0.8);
+  const selected = weightedSampleCandidates(candidates, target, options.logoMode ? 0.52 : 0.68);
   return selected.map((point, i) => ({
-      x: ((point.x - centerX) / maxDim) * 2.5,
-      y: -((point.y - centerY) / maxDim) * 2.5,
-      z: (point.a - 0.5) * 0.08 + (point.luminance - 0.5) * 0.06 + (hash01(i * 4.11) - 0.5) * 0.025,
+      x: ((point.x - centerX) / maxDim) * 2.82,
+      y: -((point.y - centerY) / maxDim) * 2.82,
+      z: (point.a - 0.5) * 0.055 + (point.luminance - 0.5) * 0.04 + (hash01(i * 4.11) - 0.5) * 0.016,
       r: point.r,
       g: point.g,
       b: point.b,
       a: point.a,
       mix: THREE.MathUtils.clamp((point.g * 0.45 + point.b * 0.65) / (point.r + point.g + point.b + 0.001), 0, 1),
-      glow: 0.48 + point.a * 0.28 + point.luminance * 0.18 + point.gradient * 0.28,
-      jitter: point.strong ? 0.0015 : 0.0035,
+      glow: 0.26 + point.a * 0.18 + point.luminance * 0.12 + point.gradient * 0.18,
+      jitter: point.strong ? 0.0009 : 0.0022,
       kind: point.strong ? 1 : 0,
     }));
+}
+
+function localContrast(values, width, index) {
+  const center = values[index];
+  return Math.max(
+    Math.abs(center - values[index - 1]),
+    Math.abs(center - values[index + 1]),
+    Math.abs(center - values[index - width]),
+    Math.abs(center - values[index + width]),
+  );
 }
 
 function gaussianBlur3x3(source, target, width, height) {
@@ -1367,12 +1625,12 @@ function weightedSampleCandidates(candidates, targetCount, strongRatio) {
   const flatTarget = targetCount - strongTarget;
 
   if (strong.length > 0 && strong.length <= strongTarget) {
-    selected.push(...strong);
-    selected.push(...weightedPickMany(strong, strongTarget - strong.length, 17.13));
+    appendMany(selected, strong);
+    appendMany(selected, weightedPickMany(strong, strongTarget - strong.length, 17.13));
   } else {
-    selected.push(...weightedPickMany(strong.length > 0 ? strong : candidates, strongTarget, 17.13));
+    appendMany(selected, weightedPickMany(strong.length > 0 ? strong : candidates, strongTarget, 17.13));
   }
-  selected.push(...weightedPickMany(flat.length > 0 ? flat : candidates, flatTarget, 29.71));
+  appendMany(selected, weightedPickMany(flat.length > 0 ? flat : candidates, flatTarget, 29.71));
 
   while (selected.length < targetCount) {
     selected.push(candidates[Math.floor(hash01(selected.length * 8.31) * candidates.length)]);
@@ -1381,6 +1639,12 @@ function weightedSampleCandidates(candidates, targetCount, strongRatio) {
     selected.length = targetCount;
   }
   return selected;
+}
+
+function appendMany(target, items) {
+  for (let i = 0; i < items.length; i += 1) {
+    target.push(items[i]);
+  }
 }
 
 function weightedPickMany(candidates, count, seed) {
@@ -1399,7 +1663,7 @@ function weightedPickMany(candidates, count, seed) {
   return picked;
 }
 
-async function createMeshPointCloud(file) {
+async function createMeshPointCloud(file, targetCount) {
   const url = URL.createObjectURL(file);
   try {
     const loader = new GLTFLoader();
@@ -1413,7 +1677,8 @@ async function createMeshPointCloud(file) {
       const geometry = object.geometry;
       const position = geometry.attributes.position;
       const index = geometry.index;
-      const color = object.material?.color instanceof THREE.Color ? object.material.color : new THREE.Color("#ffffff");
+      const color = meshMaterialColor(object.material);
+      const colorAttribute = geometry.attributes.color;
       const matrix = object.matrixWorld;
       const a = new THREE.Vector3();
       const b = new THREE.Vector3();
@@ -1428,7 +1693,16 @@ async function createMeshPointCloud(file) {
         c.fromBufferAttribute(position, ic).applyMatrix4(matrix);
         const area = new THREE.Triangle(a, b, c).getArea();
         if (area <= 0.000001) continue;
-        triangles.push({ a: a.clone(), b: b.clone(), c: c.clone(), area, color: color.clone() });
+        triangles.push({
+          a: a.clone(),
+          b: b.clone(),
+          c: c.clone(),
+          area,
+          color: color.clone(),
+          colorA: colorAttribute ? readVertexColor(colorAttribute, ia) : null,
+          colorB: colorAttribute ? readVertexColor(colorAttribute, ib) : null,
+          colorC: colorAttribute ? readVertexColor(colorAttribute, ic) : null,
+        });
         box.expandByPoint(a);
         box.expandByPoint(b);
         box.expandByPoint(c);
@@ -1449,7 +1723,8 @@ async function createMeshPointCloud(file) {
       cumulative.push(totalArea);
     }
 
-    const sampleCount = Math.min(62000, Math.max(14000, triangles.length * 16));
+    const desiredCount = Number.isFinite(targetCount) && targetCount > 0 ? targetCount : triangles.length * 16;
+    const sampleCount = Math.min(120000, Math.max(14000, desiredCount));
     const points = [];
     for (let i = 0; i < sampleCount; i += 1) {
       const pick = hash01(i * 12.9898) * totalArea;
@@ -1467,16 +1742,17 @@ async function createMeshPointCloud(file) {
         .addScaledVector(triangle.c, w)
         .sub(center)
         .multiplyScalar(normalizer);
-      const colorTotal = triangle.color.r + triangle.color.g + triangle.color.b + 0.001;
+      const sampledColor = sampleTriangleColor(triangle, u, v, w);
+      const colorTotal = sampledColor.r + sampledColor.g + sampledColor.b + 0.001;
       points.push({
         x: point.x,
         y: point.y,
         z: point.z,
-        r: triangle.color.r,
-        g: triangle.color.g,
-        b: triangle.color.b,
+        r: sampledColor.r,
+        g: sampledColor.g,
+        b: sampledColor.b,
         a: 1,
-        mix: THREE.MathUtils.clamp((triangle.color.g * 0.45 + triangle.color.b * 0.65) / colorTotal, 0, 1),
+        mix: THREE.MathUtils.clamp((sampledColor.g * 0.45 + sampledColor.b * 0.65) / colorTotal, 0, 1),
         glow: 0.54 + hash01(i * 5.91) * 0.28,
         jitter: 0.004,
       });
@@ -1485,6 +1761,26 @@ async function createMeshPointCloud(file) {
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+function meshMaterialColor(material) {
+  const source = Array.isArray(material) ? material.find((item) => item?.color instanceof THREE.Color) : material;
+  return source?.color instanceof THREE.Color ? source.color : new THREE.Color("#ffffff");
+}
+
+function readVertexColor(attribute, index) {
+  return new THREE.Color(attribute.getX(index), attribute.getY(index), attribute.getZ(index));
+}
+
+function sampleTriangleColor(triangle, u, v, w) {
+  if (!triangle.colorA || !triangle.colorB || !triangle.colorC) {
+    return triangle.color;
+  }
+  return new THREE.Color(
+    triangle.colorA.r * u + triangle.colorB.r * v + triangle.colorC.r * w,
+    triangle.colorA.g * u + triangle.colorB.g * v + triangle.colorC.g * w,
+    triangle.colorA.b * u + triangle.colorB.b * v + triangle.colorC.b * w,
+  );
 }
 
 function lowerBound(values, target) {

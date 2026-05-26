@@ -560,6 +560,14 @@ h1 {
   grid-template-columns: 1fr 1fr;
 }
 
+.show-controls {
+  grid-template-columns: 1fr 64px;
+}
+
+.show-controls select {
+  min-width: 0;
+}
+
 .image-option-field {
   margin-block: 8px;
 }

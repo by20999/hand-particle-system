@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { MODEL_SCALE, START_SCALE } from "./config.js";
 import { writePointCloudTargets, writeShapeTargets, writeTextTargets } from "./shapes.js";
 
-export function createParticleSystem({ count, color, accent = "#52d7de", pixelRatio }) {
+export function createParticleSystem({ count, color, accent = "#52d7de", pixelRatio, fboSimulation = false }) {
   const geometry = new THREE.BufferGeometry();
   const positions = new Float32Array(count * 3);
   const targets = new Float32Array(count * 3);
@@ -21,16 +21,13 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
   const targetMeta = new Float32Array(count * 3);
   const targetKinds = new Float32Array(count);
   const wavePhase = new Float32Array(count);
-  const wavePhaseY = new Float32Array(count);
-  const wavePhaseZ = new Float32Array(count);
   const depthSigns = new Float32Array(count);
-  const radialWeights = new Float32Array(count);
-  const depthWeights = new Float32Array(count);
-  const swirlWeights = new Float32Array(count);
-  const pointerPhase = new Float32Array(count);
+  const simSize = fboSimulation ? Math.ceil(Math.sqrt(count)) : 0;
+  const simUvs = fboSimulation ? new Float32Array(count * 2) : null;
 
   for (let i = 0; i < count; i += 1) {
     const i3 = i * 3;
+    const i4 = i * 4;
     const random = Math.random();
     positions[i3] = (Math.random() - 0.5) * 8;
     positions[i3 + 1] = (Math.random() - 0.5) * 8;
@@ -39,21 +36,21 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
     colorMixes[i] = Math.random();
     particleParams[i * 2] = randomness[i];
     particleParams[i * 2 + 1] = colorMixes[i];
-    particleColors[i3] = 1;
-    particleColors[i3 + 1] = 1;
-    particleColors[i3 + 2] = 1;
-    particleColors[i3 + 3] = 1;
+    particleColors[i4] = 1;
+    particleColors[i4 + 1] = 1;
+    particleColors[i4 + 2] = 1;
+    particleColors[i4 + 3] = 1;
     brightnesses[i] = 1;
     baseBrightnesses[i] = 1;
     targetKinds[i] = 0;
     wavePhase[i] = i * 12.9898 + random * 6.283;
-    wavePhaseY[i] = i * 17.121 + random * 4.881;
-    wavePhaseZ[i] = i * 9.271 + random * 7.417;
     depthSigns[i] = Math.sin(i * 19.191 + random * 8.0);
-    radialWeights[i] = 0.28 + random * 1.25;
-    depthWeights[i] = 0.18 + random * 0.82;
-    swirlWeights[i] = 0.4 + random;
-    pointerPhase[i] = i * 0.13;
+    if (simUvs) {
+      const simX = i % simSize;
+      const simY = Math.floor(i / simSize);
+      simUvs[i * 2] = (simX + 0.5) / simSize;
+      simUvs[i * 2 + 1] = (simY + 0.5) / simSize;
+    }
   }
 
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
@@ -64,8 +61,14 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
   geometry.setAttribute("aParticleColor", new THREE.BufferAttribute(particleColors, 4));
   geometry.setAttribute("aWavePhase", new THREE.BufferAttribute(wavePhase, 1));
   geometry.setAttribute("aDepthSign", new THREE.BufferAttribute(depthSigns, 1));
+  if (simUvs) {
+    geometry.setAttribute("aSimUv", new THREE.BufferAttribute(simUvs, 2));
+  }
+
+  const simulation = fboSimulation ? createFboSimulation(count, simSize, positions, targets) : null;
 
   const material = new THREE.ShaderMaterial({
+    defines: fboSimulation ? { USE_FBO_SIM: "1" } : {},
     transparent: true,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
@@ -88,8 +91,19 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
       uModelType: { value: 0 },
       uPointer: { value: new THREE.Vector3(0, 0, 0) },
       uUseVertexColor: { value: 0 },
+      ...(fboSimulation
+        ? {
+            uSimPosition: { value: simulation.currentTexture },
+            uSimulationBlend: { value: 0.32 },
+          }
+        : {}),
     },
     vertexShader: `
+      #ifdef USE_FBO_SIM
+      attribute vec2 aSimUv;
+      uniform sampler2D uSimPosition;
+      uniform float uSimulationBlend;
+      #endif
       attribute vec3 aTarget;
       attribute vec3 aTargetDir;
       attribute vec3 aTargetMeta;
@@ -195,6 +209,13 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
         target += uPointer * (0.55 + aRandom * 0.45);
 
         vBrightness = brightness;
+        #ifdef USE_FBO_SIM
+        float fboBlend = uSimulationBlend;
+        if (abs(uModelType - 3.0) < 0.5) {
+          fboBlend *= 0.18;
+        }
+        target = mix(target, texture2D(uSimPosition, aSimUv).xyz, fboBlend);
+        #endif
         vec4 mvPosition = modelViewMatrix * vec4(target, 1.0);
         float pulse = 0.78 + 0.22 * sin(uTime * 2.0 + aRandom * 8.0);
         float sizeBrightness = 0.62 + clamp(vBrightness, 0.08, 2.2) * 0.28;
@@ -218,7 +239,7 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
         float core = smoothstep(0.18, 0.0, d);
         vec3 palette = mix(uColor, uAccent, vColorMix * 0.55);
         vec3 color = mix(palette, vParticleColor.rgb, uUseVertexColor);
-        color += core * 0.85;
+        color += core * mix(0.85, 0.34, uUseVertexColor);
         color *= vBrightness;
         float vertexAlpha = mix(1.0, vParticleColor.a, uUseVertexColor);
         gl_FragColor = vec4(color, alpha * vertexAlpha * (0.72 + vRandom * 0.38) * clamp(vBrightness, 0.25, 1.65));
@@ -250,14 +271,9 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
     targetMeta,
     targetKinds,
     wavePhase,
-    wavePhaseY,
-    wavePhaseZ,
     depthSigns,
-    radialWeights,
-    depthWeights,
-    swirlWeights,
-    pointerPhase,
     gpuDriven: true,
+    simulation,
   };
 }
 
@@ -274,6 +290,7 @@ export function setParticleTargets(particles, model) {
   }
   syncTargetDirectionAttribute(particles);
   syncParticleParamsAttribute(particles);
+  syncSimulationTargetTexture(particles);
   particles.geometry.attributes.aTarget.needsUpdate = true;
   particles.geometry.attributes.aTargetDir.needsUpdate = true;
   particles.geometry.attributes.aTargetMeta.needsUpdate = true;
@@ -354,6 +371,7 @@ export function updateParticles(particles, state, options) {
   const peakLevel = audio.peak ?? Math.max(audioLevel, beatPulse);
   const onsetPulse = audio.onset ?? 0;
   const isTextModel = state.model === "text";
+  const isImageModel = state.model === "image";
   const isFlowerModel = state.model === "flower";
   const isFireworksModel = state.model === "fireworks";
   const rawShapeGesture = handActive ? g : Math.min(g, 0.34 + state.pointerBoost * 0.18);
@@ -367,7 +385,7 @@ export function updateParticles(particles, state, options) {
   );
   const musicTransient = Math.min(1, musicImpact * 0.38 + Math.max(0, bassLevel - audioLevel * 0.62) * 0.16);
   const musicShimmer = Math.min(1, THREE.MathUtils.smoothstep(trebleLevel, 0.34, 0.88) * 0.62 + midLevel * 0.05);
-  const baseModelScale = isTextModel ? 0.62 : isFireworksModel ? 0.72 : isFlowerModel ? 0.62 : 0.72;
+  const baseModelScale = isTextModel ? 0.62 : isImageModel ? 0.84 : isFireworksModel ? 0.72 : isFlowerModel ? 0.62 : 0.72;
   const gestureScale = isTextModel ? 1.72 : isFireworksModel ? 0.22 : 2.38;
   const modelScale = MODEL_SCALE * (baseModelScale + shapeGesture * gestureScale) * (1 + musicTransient * 0.045);
   const diffusion = recovering
@@ -419,7 +437,7 @@ export function updateParticles(particles, state, options) {
   material.uniforms.uModelType.value = isTextModel ? 4 : isFireworksModel ? 3 : isFlowerModel ? 1 : state.model === "saturn" ? 2 : 0;
   material.uniforms.uPointer.value.lerp(pointerDirection, 0.18);
 
-  const textToneDown = isTextModel ? 0.78 : 1;
+  const bloomToneDown = isImageModel ? 0.58 : isTextModel ? 0.78 : 1;
   bloomPass.strength =
     (0.42 +
       shapeGesture * 0.22 +
@@ -427,12 +445,23 @@ export function updateParticles(particles, state, options) {
       musicImpact * 0.34 +
       musicShimmer * 0.04 +
       (isFireworksModel ? fireworkExplosion * 0.68 : 0)) *
-    textToneDown;
+    bloomToneDown;
   material.uniforms.uPointSize.value =
-    (isTextModel ? 12.4 : isFireworksModel ? 7.4 : 18) +
-    shapeGesture * (isTextModel ? 2.4 : isFireworksModel ? 1.1 : 5) +
-    musicImpact * (isFireworksModel ? 3.1 : 4.2) +
+    (isTextModel ? 12.4 : isImageModel ? 10.6 : isFireworksModel ? 7.4 : 18) +
+    shapeGesture * (isTextModel ? 2.4 : isImageModel ? 1.4 : isFireworksModel ? 1.1 : 5) +
+    musicImpact * (isImageModel ? 1.8 : isFireworksModel ? 3.1 : 4.2) +
     (isFireworksModel ? fireworkExplosion * 6.2 : 0);
+  updateFboSimulation(particles, options.renderer, {
+    delta,
+    elapsed,
+    modelScale,
+    shapeGesture,
+    diffusion,
+    transitionBoost,
+    musicImpact,
+    pointer: material.uniforms.uPointer.value,
+    modelType: material.uniforms.uModelType.value,
+  });
   onGestureUpdate(Math.round(g * 100));
 }
 
@@ -463,4 +492,174 @@ function syncParticleParamsAttribute(particles) {
     particleParams[i2] = randomness[i];
     particleParams[i2 + 1] = colorMixes[i];
   }
+}
+
+function createFboSimulation(count, size, positions, targets) {
+  const initialData = new Float32Array(size * size * 4);
+  const targetData = new Float32Array(size * size * 4);
+  for (let i = 0; i < count; i += 1) {
+    const i3 = i * 3;
+    const i4 = i * 4;
+    initialData[i4] = positions[i3];
+    initialData[i4 + 1] = positions[i3 + 1];
+    initialData[i4 + 2] = positions[i3 + 2];
+    initialData[i4 + 3] = 1;
+    targetData[i4] = targets[i3];
+    targetData[i4 + 1] = targets[i3 + 1];
+    targetData[i4 + 2] = targets[i3 + 2];
+    targetData[i4 + 3] = 1;
+  }
+
+  const initialTexture = dataTexture(initialData, size);
+  const targetTexture = dataTexture(targetData, size);
+  const targetOptions = {
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+    wrapS: THREE.ClampToEdgeWrapping,
+    wrapT: THREE.ClampToEdgeWrapping,
+    type: THREE.HalfFloatType,
+    format: THREE.RGBAFormat,
+    depthBuffer: false,
+    stencilBuffer: false,
+  };
+  const writeTarget = new THREE.WebGLRenderTarget(size, size, targetOptions);
+  const spareTarget = new THREE.WebGLRenderTarget(size, size, targetOptions);
+  const scene = new THREE.Scene();
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const material = new THREE.ShaderMaterial({
+    depthTest: false,
+    depthWrite: false,
+    uniforms: {
+      uPreviousPosition: { value: initialTexture },
+      uTargetPosition: { value: targetTexture },
+      uTime: { value: 0 },
+      uDelta: { value: 0.016 },
+      uModelScale: { value: MODEL_SCALE * 0.72 },
+      uShapeGesture: { value: 0 },
+      uDiffusion: { value: 0 },
+      uTransitionBoost: { value: 0 },
+      uMusicImpact: { value: 0 },
+      uPointer: { value: new THREE.Vector3() },
+      uModelType: { value: 0 },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+
+      void main() {
+        vUv = uv;
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+      }
+    `,
+    fragmentShader: `
+      precision highp float;
+
+      varying vec2 vUv;
+      uniform sampler2D uPreviousPosition;
+      uniform sampler2D uTargetPosition;
+      uniform float uTime;
+      uniform float uDelta;
+      uniform float uModelScale;
+      uniform float uShapeGesture;
+      uniform float uDiffusion;
+      uniform float uTransitionBoost;
+      uniform float uMusicImpact;
+      uniform vec3 uPointer;
+      uniform float uModelType;
+
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+      }
+
+      void main() {
+        vec3 previous = texture2D(uPreviousPosition, vUv).xyz;
+        vec3 base = texture2D(uTargetPosition, vUv).xyz;
+        float seed = hash(vUv + 0.173);
+        float seedB = hash(vUv * 1.73 + 0.419);
+        vec3 scatter = normalize(base + vec3(seed * 0.7 + 0.1, seedB - 0.5, 0.35));
+        float noiseScale = uDiffusion * (0.16 + seed * 0.24) + uMusicImpact * 0.055;
+        vec3 noise = vec3(
+          sin(uTime * 0.91 + seed * 19.1),
+          sin(uTime * 1.23 + seedB * 17.3),
+          cos(uTime * 1.07 + seed * 13.7)
+        ) * noiseScale;
+        vec3 target = base * uModelScale + noise + uPointer * (0.22 + seed * 0.16);
+        target += scatter * uTransitionBoost * (0.85 + seed * 1.15);
+        target.z *= 1.0 + uShapeGesture * 0.3;
+
+        float isFirework = step(2.5, uModelType) * (1.0 - step(3.5, uModelType));
+        float followBase = mix(5.5, 3.2, isFirework) + uTransitionBoost * 4.6 + uMusicImpact * 2.2;
+        float follow = clamp(1.0 - exp(-uDelta * followBase), 0.018, 0.72);
+        vec3 nextPosition = mix(previous, target, follow);
+        gl_FragColor = vec4(nextPosition, 1.0);
+      }
+    `,
+  });
+  scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+
+  return {
+    enabled: true,
+    size,
+    targetData,
+    initialTexture,
+    targetTexture,
+    currentTexture: initialTexture,
+    writeTarget,
+    spareTarget,
+    scene,
+    camera,
+    material,
+  };
+}
+
+function dataTexture(data, size) {
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.FloatType);
+  texture.minFilter = THREE.NearestFilter;
+  texture.magFilter = THREE.NearestFilter;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function syncSimulationTargetTexture(particles) {
+  const simulation = particles.simulation;
+  if (!simulation?.enabled) return;
+  const { count, targets } = particles;
+  for (let i = 0; i < count; i += 1) {
+    const i3 = i * 3;
+    const i4 = i * 4;
+    simulation.targetData[i4] = targets[i3];
+    simulation.targetData[i4 + 1] = targets[i3 + 1];
+    simulation.targetData[i4 + 2] = targets[i3 + 2];
+    simulation.targetData[i4 + 3] = 1;
+  }
+  simulation.targetTexture.needsUpdate = true;
+}
+
+function updateFboSimulation(particles, renderer, state) {
+  const simulation = particles.simulation;
+  if (!simulation?.enabled || !renderer) return;
+
+  simulation.material.uniforms.uPreviousPosition.value = simulation.currentTexture;
+  simulation.material.uniforms.uTargetPosition.value = simulation.targetTexture;
+  simulation.material.uniforms.uTime.value = state.elapsed;
+  simulation.material.uniforms.uDelta.value = Math.max(0.001, Math.min(state.delta, 0.05));
+  simulation.material.uniforms.uModelScale.value = state.modelScale;
+  simulation.material.uniforms.uShapeGesture.value = state.shapeGesture;
+  simulation.material.uniforms.uDiffusion.value = state.diffusion;
+  simulation.material.uniforms.uTransitionBoost.value = state.transitionBoost;
+  simulation.material.uniforms.uMusicImpact.value = state.musicImpact;
+  simulation.material.uniforms.uPointer.value.copy(state.pointer);
+  simulation.material.uniforms.uModelType.value = state.modelType;
+
+  const previousTarget = renderer.getRenderTarget();
+  renderer.setRenderTarget(simulation.writeTarget);
+  renderer.render(simulation.scene, simulation.camera);
+  renderer.setRenderTarget(previousTarget);
+
+  simulation.currentTexture = simulation.writeTarget.texture;
+  particles.material.uniforms.uSimPosition.value = simulation.currentTexture;
+  const nextWriteTarget = simulation.spareTarget;
+  simulation.spareTarget = simulation.writeTarget;
+  simulation.writeTarget = nextWriteTarget;
 }

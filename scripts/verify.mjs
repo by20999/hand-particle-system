@@ -35,6 +35,8 @@ try {
   for (const testCase of cases) {
     await verifyCase(browser, testCase);
   }
+
+  await verifyInteractions(browser);
 } finally {
   if (browser) {
     await browser.close();
@@ -46,43 +48,124 @@ try {
 
 async function verifyCase(activeBrowser, testCase) {
   const page = await activeBrowser.newPage({ viewport: testCase.viewport });
-  const messages = [];
-  const missing = [];
+  const issues = watchPageIssues(page);
 
-  page.on("console", (message) => {
-    if (message.type() === "error") messages.push(message.text());
-  });
-  page.on("response", (response) => {
-    if (response.status() === 404) missing.push(response.url());
-  });
+  let canvasBox = null;
+  let sample = null;
+  try {
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+    const canvas = page.locator("#scene");
+    await canvas.waitFor({ state: "visible", timeout: 15000 });
+    await page.waitForTimeout(3500);
 
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
-  await page.locator("#scene").waitFor({ state: "visible", timeout: 15000 });
-  await page.waitForTimeout(3500);
-
-  const canvasBox = await page.locator("#scene").boundingBox();
-  const screenshot = await page.screenshot({
-    path: `verification-${testCase.name}.png`,
-    fullPage: false,
-  });
-  const sample = sampleScreenshotPixels(screenshot);
-
-  await page.close();
+    canvasBox = await canvas.boundingBox();
+    await page.screenshot({
+      path: `verification-${testCase.name}.png`,
+      fullPage: false,
+    });
+    const canvasScreenshot = await canvas.screenshot();
+    sample = sampleScreenshotPixels(canvasScreenshot);
+  } finally {
+    await page.close();
+  }
 
   console.log(
     `${testCase.name}: canvas=${Math.round(canvasBox.width)}x${Math.round(canvasBox.height)}, lit=${(
       sample.litRatio * 100
-    ).toFixed(2)}%`,
+    ).toFixed(2)}%, range=${sample.range}`,
   );
 
-  if (messages.length) {
-    throw new Error(`${testCase.name}: console errors: ${messages.join(" | ")}`);
-  }
-  if (missing.length) {
-    throw new Error(`${testCase.name}: 404: ${missing.join(" | ")}`);
+  if (issues.length) {
+    throw new Error(`${testCase.name}: browser issues: ${issues.join(" | ")}`);
   }
   if (!sample.ok) {
     throw new Error(`${testCase.name}: canvas appears blank`);
+  }
+}
+
+async function verifyInteractions(activeBrowser) {
+  const page = await activeBrowser.newPage({ viewport: { width: 1366, height: 768 } });
+  const issues = watchPageIssues(page);
+
+  try {
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.locator("#scene").waitFor({ state: "visible", timeout: 15000 });
+    await page.waitForTimeout(1800);
+
+    for (const selector of [
+      '[data-model="flower"]',
+      '[data-model="saturn"]',
+      '[data-model="fireworks"]',
+      '[data-model="text"]',
+      '[data-model="heart"]',
+    ]) {
+      await page.click(selector);
+      await page.waitForTimeout(180);
+    }
+
+    await page.fill("#textInput", "测试LOVE");
+    await page.click("#textApplyBtn");
+    await page.waitForTimeout(300);
+
+    for (const selector of [
+      '[data-background="stage"]',
+      '[data-background="minimal"]',
+      '[data-background="fireworks"]',
+      '[data-background="nebula"]',
+    ]) {
+      await page.click(selector);
+      await page.waitForTimeout(140);
+    }
+
+    await page.selectOption("#themeSelect", "laser");
+    await page.selectOption("#showPresetSelect", "club");
+    await page.click("#showPresetToggleBtn");
+    await page.waitForTimeout(450);
+    await page.click("#showPresetToggleBtn");
+    await page.waitForTimeout(120);
+    await page.click("#gestureToggleBtn");
+    await page.waitForTimeout(120);
+    await page.click("#freezeToggleBtn");
+    await page.waitForTimeout(120);
+    await page.click("#freezeToggleBtn");
+    await page.click("#gestureToggleBtn");
+    await page.waitForTimeout(120);
+
+    await page.setInputFiles("#imageFileInput", {
+      name: "verify.bmp",
+      mimeType: "image/bmp",
+      buffer: createTestBmp(96, 96),
+    });
+    await page.waitForFunction(
+      () => {
+        const model = document.querySelector("#shapeSelect")?.value;
+        const diagnostic = document.querySelector("#diagnosticText")?.textContent ?? "";
+        return model === "image" || diagnostic.includes("图片导入失败");
+      },
+      null,
+      { timeout: 25000 },
+    );
+
+    const state = await page.evaluate(() => ({
+      model: document.querySelector("#shapeSelect")?.value,
+      diagnostic: document.querySelector("#diagnosticText")?.textContent ?? "",
+      background: document.documentElement.dataset.background,
+      theme: document.documentElement.dataset.themeMood,
+    }));
+
+    if (state.model !== "image") {
+      throw new Error(`interaction: image import did not activate image model: ${state.diagnostic}`);
+    }
+    if (state.diagnostic.includes("失败")) {
+      throw new Error(`interaction: image import failed: ${state.diagnostic}`);
+    }
+    if (issues.length) {
+      throw new Error(`interaction: browser issues: ${issues.join(" | ")}`);
+    }
+
+    console.log(`interaction: model=${state.model}, background=${state.background}, theme=${state.theme}`);
+  } finally {
+    await page.close();
   }
 }
 
@@ -154,19 +237,80 @@ function sampleScreenshotPixels(buffer) {
   const maxY = Math.floor(png.height * 0.78);
   let lit = 0;
   let total = 0;
+  let min = 255;
+  let max = 0;
+  let mean = 0;
 
   for (let y = minY; y < maxY; y += 1) {
     for (let x = minX; x < maxX; x += 1) {
       const i = (y * png.width + x) * 4;
-      if (png.pixels[i] + png.pixels[i + 1] + png.pixels[i + 2] > 28) {
+      const brightness = Math.round((png.pixels[i] + png.pixels[i + 1] + png.pixels[i + 2]) / 3);
+      if (brightness > 9) {
         lit += 1;
       }
+      min = Math.min(min, brightness);
+      max = Math.max(max, brightness);
+      mean += brightness;
       total += 1;
     }
   }
 
   const litRatio = lit / total;
-  return { ok: litRatio > 0.002, litRatio };
+  const range = max - min;
+  mean /= total;
+  return { ok: litRatio > 0.002 && range > 8 && mean > 1, litRatio, range, mean };
+}
+
+function watchPageIssues(page) {
+  const issues = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") issues.push(`console: ${message.text()}`);
+  });
+  page.on("pageerror", (error) => {
+    issues.push(`pageerror: ${error.message}`);
+  });
+  page.on("response", (response) => {
+    if (response.status() === 404) issues.push(`404: ${response.url()}`);
+  });
+  page.on("requestfailed", (request) => {
+    issues.push(`request failed: ${request.url()} ${request.failure()?.errorText ?? ""}`.trim());
+  });
+  return issues;
+}
+
+function createTestBmp(width, height) {
+  const rowSize = Math.ceil((width * 3) / 4) * 4;
+  const pixelSize = rowSize * height;
+  const fileSize = 54 + pixelSize;
+  const buffer = Buffer.alloc(fileSize);
+  buffer.write("BM", 0, "ascii");
+  buffer.writeUInt32LE(fileSize, 2);
+  buffer.writeUInt32LE(54, 10);
+  buffer.writeUInt32LE(40, 14);
+  buffer.writeInt32LE(width, 18);
+  buffer.writeInt32LE(height, 22);
+  buffer.writeUInt16LE(1, 26);
+  buffer.writeUInt16LE(24, 28);
+  buffer.writeUInt32LE(pixelSize, 34);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const topY = height - 1 - y;
+      const dx = x - width / 2;
+      const dy = topY - height / 2;
+      const circle = Math.hypot(dx, dy) < width * 0.28;
+      const cross = Math.abs(dx) < 5 || Math.abs(dy) < 5;
+      const offset = 54 + y * rowSize + x * 3;
+      const r = circle ? 230 : cross ? 50 : 255;
+      const g = circle ? 30 : cross ? 180 : 255;
+      const b = circle ? 90 : cross ? 250 : 255;
+      buffer[offset] = b;
+      buffer[offset + 1] = g;
+      buffer[offset + 2] = r;
+    }
+  }
+
+  return buffer;
 }
 
 function decodePng(buffer) {
