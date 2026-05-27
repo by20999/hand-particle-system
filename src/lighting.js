@@ -2,13 +2,13 @@ import * as THREE from "three";
 
 export function createStaticLightSources(baseColor, accentColor = baseColor) {
   const group = new THREE.Group();
-  group.userData.ambient = new THREE.AmbientLight(0xffffff, 0.12);
+  group.userData.ambient = new THREE.AmbientLight(0xffffff, 0.15);
   group.add(group.userData.ambient);
 
   const lights = [
-    { role: "main", position: [-0.2, 0.15, -4.2], intensity: 1.12, distance: 13, scale: 8.8, opacity: 0.34 },
-    { role: "wash", position: [-2.8, 1.9, -5.4], intensity: 0.54, distance: 15, scale: 7.2, opacity: 0.22 },
-    { role: "shade", position: [2.9, -1.7, -5.8], intensity: 0.38, distance: 14, scale: 6.8, opacity: 0.16 },
+    { role: "main", position: [-0.2, 0.15, -4.2], intensity: 0.86, distance: 13, scale: 8.2, opacity: 0.2 },
+    { role: "wash", position: [-2.8, 1.9, -5.4], intensity: 0.42, distance: 15, scale: 6.8, opacity: 0.15 },
+    { role: "shade", position: [2.9, -1.7, -5.8], intensity: 0.3, distance: 14, scale: 6.4, opacity: 0.1 },
   ];
 
   const texture = createGlowTexture();

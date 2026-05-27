@@ -2,12 +2,18 @@ import * as THREE from "three";
 import { hash } from "./shapes.js";
 
 const TAU = Math.PI * 2;
+const BACKGROUND_GAIN = 1.02;
+const BACKGROUND_CAP_GAIN = 1.18;
+let runtimeBackgroundBrightness = 1;
 
 const BACKGROUND_MODES = {
   nebula: "星云",
   stage: "柔光舞台",
   minimal: "极简黑场",
   fireworks: "烟花夜空",
+  aurora: "极光帷幕",
+  lattice: "光网隧道",
+  sunset: "日落霓霞",
 };
 
 export function createBackgroundSystem(theme) {
@@ -22,15 +28,22 @@ export function createBackgroundSystem(theme) {
   const stage = createStageScene(theme, textures);
   const minimal = createMinimalScene(theme, textures);
   const fireworks = createFireworksScene(theme, textures);
+  const aurora = createAuroraScene(theme, textures);
+  const lattice = createLatticeScene(theme, textures);
+  const sunset = createSunsetScene(theme, textures);
 
-  group.add(nebula, stage, minimal, fireworks);
+  group.add(nebula, stage, minimal, fireworks, aurora, lattice, sunset);
   const system = {
     group,
     mode: "nebula",
+    brightness: 1,
     nebula,
     stage,
     minimal,
     fireworks,
+    aurora,
+    lattice,
+    sunset,
     textures,
   };
   setBackgroundMode(system, "nebula", theme);
@@ -41,28 +54,40 @@ export function backgroundModes() {
   return BACKGROUND_MODES;
 }
 
+export function setBackgroundBrightness(system, brightness, theme) {
+  system.brightness = THREE.MathUtils.clamp(brightness, 0.35, 2.2);
+  runtimeBackgroundBrightness = system.brightness;
+  if (theme) {
+    applyBackgroundTheme(system, theme);
+  }
+}
+
 export function setBackgroundMode(system, mode, theme) {
   system.mode = BACKGROUND_MODES[mode] ? mode : "nebula";
-  system.nebula.visible = system.mode === "nebula";
-  system.stage.visible = system.mode === "stage";
-  system.minimal.visible = system.mode === "minimal";
-  system.fireworks.visible = system.mode === "fireworks";
+  for (const key of Object.keys(BACKGROUND_MODES)) {
+    if (system[key]) {
+      system[key].visible = system.mode === key;
+    }
+  }
   document.documentElement.dataset.background = system.mode;
   applyBackgroundTheme(system, theme);
 }
 
 export function applyBackgroundTheme(system, theme) {
-  for (const scene of [system.nebula, system.stage, system.minimal, system.fireworks]) {
+  const brightness = THREE.MathUtils.clamp(system.brightness ?? 1, 0.35, 2.2);
+  for (const key of Object.keys(BACKGROUND_MODES)) {
+    const scene = system[key];
+    if (!scene) continue;
     for (const item of scene.userData.materials ?? []) {
       if (item.material.uniforms?.uColorA) {
         item.material.uniforms.uColorA.value.copy(colorForRole(theme, "primary", item.mix ?? 0.5));
         item.material.uniforms.uColorB.value.copy(colorForRole(theme, "accent", item.mix ?? 0.5));
         item.material.uniforms.uColorC.value.copy(colorForRole(theme, "haze", item.mix ?? 0.5));
         item.material.uniforms.uRim.value.copy(colorForRole(theme, "rim", item.mix ?? 0.5));
-        item.material.uniforms.uOpacity.value = item.opacity;
+        item.material.uniforms.uOpacity.value = item.opacity * BACKGROUND_GAIN * brightness;
       } else if (item.material.color) {
         item.material.color.copy(colorForRole(theme, item.role, item.mix ?? 0.5));
-        item.material.opacity = item.opacity;
+        item.material.opacity = item.opacity * BACKGROUND_GAIN * brightness;
       }
     }
   }
@@ -72,6 +97,7 @@ export function updateBackground(system, elapsed, audio = 0, model = "heart") {
   const metrics = normalizeAudio(audio);
   const active = system[system.mode];
   if (!active) return;
+  runtimeBackgroundBrightness = THREE.MathUtils.clamp(system.brightness ?? 1, 0.35, 2.2);
   const modelFocus = modelFocusValue(model);
   const focusScale = 1 + modelFocus * 0.08 + metrics.beat * 0.035;
 
@@ -92,6 +118,18 @@ export function updateBackground(system, elapsed, audio = 0, model = "heart") {
 
   if (system.mode === "fireworks") {
     updateFireworksSky(system.fireworks, elapsed, metrics, modelFocus);
+  }
+
+  if (system.mode === "aurora") {
+    updateAurora(system.aurora, elapsed, metrics, modelFocus);
+  }
+
+  if (system.mode === "lattice") {
+    updateLattice(system.lattice, elapsed, metrics, modelFocus);
+  }
+
+  if (system.mode === "sunset") {
+    updateSunset(system.sunset, elapsed, metrics, modelFocus);
   }
 }
 
@@ -401,6 +439,194 @@ function createFireworksScene(theme, textures) {
   return group;
 }
 
+function createAuroraScene(theme, textures) {
+  const group = new THREE.Group();
+  const materials = [];
+
+  group.add(createAtmospherePlane(theme, 0, 0.43, materials));
+  group.add(createStarField(theme, 1400, 9, 28, -14, 0.17, 0.022, materials));
+
+  for (let band = 0; band < 11; band += 1) {
+    const points = [];
+    const width = 11 + band * 0.28;
+    const y = 0.6 + band * 0.18;
+    const z = -5.6 - band * 0.42;
+    for (let i = 0; i < 220; i += 1) {
+      const t = i / 219;
+      const x = -width / 2 + t * width;
+      const wave = Math.sin(t * TAU * (1.2 + band * 0.07) + band * 0.8) * (0.24 + band * 0.018);
+      points.push(new THREE.Vector3(x, y + wave, z + Math.sin(t * Math.PI) * 0.35));
+    }
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.LineBasicMaterial({
+      color: colorForRole(theme, band % 3 === 0 ? "haze" : band % 3 === 1 ? "accent" : "primary"),
+      transparent: true,
+      opacity: 0.018 + band * 0.0014,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const line = new THREE.Line(geometry, material);
+    line.rotation.x = -0.18 + band * 0.01;
+    line.rotation.z = (band - 5) * 0.018;
+    line.userData = {
+      kind: "auroraRibbon",
+      baseOpacity: material.opacity,
+      baseY: line.position.y,
+      speed: 0.05 + band * 0.006,
+      phase: band * 0.72,
+    };
+    group.add(line);
+    materials.push({ material, role: band % 3 === 0 ? "haze" : band % 3 === 1 ? "accent" : "primary", opacity: material.opacity });
+  }
+
+  for (let i = 0; i < 8; i += 1) {
+    const material = new THREE.SpriteMaterial({
+      map: textures.cloud,
+      color: colorForRole(theme, i % 2 === 0 ? "haze" : "accent", hash(i * 2.3)),
+      transparent: true,
+      opacity: 0.046 + hash(i * 5.1) * 0.04,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.set((hash(i * 1.4) - 0.5) * 8.6, 0.4 + hash(i * 2.2) * 3.4, -6.2 - i * 0.48);
+    const scale = 3.2 + hash(i * 3.7) * 4.6;
+    sprite.scale.set(scale * 1.4, scale * 0.68, 1);
+    sprite.rotation.z = (hash(i * 7.6) - 0.5) * 0.34;
+    sprite.userData = {
+      kind: "auroraMist",
+      baseOpacity: material.opacity,
+      baseScale: sprite.scale.clone(),
+      speed: 0.04 + hash(i * 3.9) * 0.04,
+      phase: hash(i * 8.2) * TAU,
+    };
+    group.add(sprite);
+    materials.push({ material, role: i % 2 === 0 ? "haze" : "accent", opacity: material.opacity, mix: hash(i * 2.3) });
+  }
+
+  group.userData.materials = materials;
+  return group;
+}
+
+function createLatticeScene(theme, textures) {
+  const group = new THREE.Group();
+  const materials = [];
+
+  group.add(createAtmospherePlane(theme, 3, 0.34, materials));
+  group.add(createStarField(theme, 720, 8, 25, -14, 0.11, 0.018, materials));
+
+  for (let layer = 0; layer < 9; layer += 1) {
+    const geometry = createLatticeGeometry(layer);
+    const material = new THREE.LineBasicMaterial({
+      color: colorForRole(theme, layer % 2 === 0 ? "accent" : "primary"),
+      transparent: true,
+      opacity: 0.04 - layer * 0.0023,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const grid = new THREE.LineSegments(geometry, material);
+    grid.position.z = -3.4 - layer * 0.72;
+    grid.rotation.x = -0.08;
+    grid.userData = {
+      kind: "latticeGrid",
+      baseOpacity: material.opacity,
+      speed: 0.1 + layer * 0.012,
+      phase: layer * 0.5,
+    };
+    group.add(grid);
+    materials.push({ material, role: layer % 2 === 0 ? "accent" : "primary", opacity: material.opacity });
+  }
+
+  for (let i = 0; i < 9; i += 1) {
+    const material = new THREE.SpriteMaterial({
+      map: textures.glow,
+      color: colorForRole(theme, i % 2 === 0 ? "rim" : "haze", hash(i * 3.2)),
+      transparent: true,
+      opacity: 0.038 + hash(i * 4.4) * 0.038,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const node = new THREE.Sprite(material);
+    node.position.set((hash(i * 2.1) - 0.5) * 8.5, (hash(i * 3.3) - 0.5) * 4.8, -4.2 - hash(i * 5.1) * 5.2);
+    const scale = 0.8 + hash(i * 6.6) * 1.6;
+    node.scale.set(scale, scale, 1);
+    node.userData = {
+      kind: "latticeNode",
+      baseOpacity: material.opacity,
+      baseScale: node.scale.clone(),
+      speed: 0.16 + hash(i * 7.2) * 0.12,
+      phase: hash(i * 8.8) * TAU,
+    };
+    group.add(node);
+    materials.push({ material, role: i % 2 === 0 ? "rim" : "haze", opacity: material.opacity, mix: hash(i * 3.2) });
+  }
+
+  group.userData.materials = materials;
+  return group;
+}
+
+function createSunsetScene(theme, textures) {
+  const group = new THREE.Group();
+  const materials = [];
+
+  group.add(createAtmospherePlane(theme, 1, 0.42, materials));
+  group.add(createStarField(theme, 520, 8, 23, -14, 0.085, 0.018, materials));
+
+  for (let i = 0; i < 12; i += 1) {
+    const material = new THREE.SpriteMaterial({
+      map: textures.cloud,
+      color: colorForRole(theme, i % 3 === 0 ? "primary" : i % 3 === 1 ? "haze" : "accent", hash(i * 4.2)),
+      transparent: true,
+      opacity: 0.055 + hash(i * 2.7) * 0.05,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const cloud = new THREE.Sprite(material);
+    cloud.position.set((hash(i * 1.7) - 0.5) * 10.5, -0.9 + hash(i * 2.1) * 3.1, -5.6 - hash(i * 3.2) * 5.4);
+    const scale = 3.8 + hash(i * 4.7) * 5.4;
+    cloud.scale.set(scale * 1.65, scale * 0.42, 1);
+    cloud.rotation.z = (hash(i * 5.9) - 0.5) * 0.18;
+    cloud.userData = {
+      kind: "sunsetCloud",
+      baseOpacity: material.opacity,
+      baseScale: cloud.scale.clone(),
+      speed: 0.035 + hash(i * 7.1) * 0.045,
+      phase: hash(i * 9.4) * TAU,
+    };
+    group.add(cloud);
+    materials.push({
+      material,
+      role: i % 3 === 0 ? "primary" : i % 3 === 1 ? "haze" : "accent",
+      opacity: material.opacity,
+      mix: hash(i * 4.2),
+    });
+  }
+
+  for (let i = 0; i < 6; i += 1) {
+    const geometry = createEllipseGeometry(220, 2.2 + i * 0.55, 0.22 + i * 0.04, -1.08 + i * 0.08);
+    const material = new THREE.LineBasicMaterial({
+      color: colorForRole(theme, i % 2 === 0 ? "primary" : "accent"),
+      transparent: true,
+      opacity: 0.027 - i * 0.0023,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const line = new THREE.Line(geometry, material);
+    line.position.z = -4.2 - i * 0.28;
+    line.userData = {
+      kind: "sunsetHorizon",
+      baseOpacity: material.opacity,
+      speed: 0.08 + i * 0.018,
+      phase: i * 0.7,
+    };
+    group.add(line);
+    materials.push({ material, role: i % 2 === 0 ? "primary" : "accent", opacity: material.opacity });
+  }
+
+  group.userData.materials = materials;
+  return group;
+}
+
 function updateAtmospheres(group, elapsed, metrics, modelFocus) {
   for (const child of group.children) {
     if (child.userData.kind !== "atmosphere") continue;
@@ -417,22 +643,28 @@ function updateNebula(group, elapsed, metrics, modelFocus) {
     if (child.userData.kind === "stars") {
       child.rotation.y = elapsed * 0.006;
       child.rotation.z = Math.sin(elapsed * 0.03) * 0.018;
-      child.material.opacity = child.userData.baseOpacity * (0.82 + metrics.treble * 0.32);
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * (0.82 + metrics.treble * 0.32), 0.22);
     }
     if (child.userData.kind === "cloud") {
       const breathe = 1 + Math.sin(elapsed * child.userData.speed + child.userData.phase) * 0.055 + metrics.beat * 0.04;
       child.scale.copy(child.userData.baseScale).multiplyScalar(breathe);
-      child.material.opacity = child.userData.baseOpacity * (0.82 + metrics.level * 0.62 + metrics.treble * 0.3);
+      child.material.opacity = safeBackgroundOpacity(
+        child.userData.baseOpacity * (0.76 + metrics.level * 0.36 + metrics.treble * 0.2),
+        0.2,
+      );
       child.rotation.z += 0.0008 + metrics.mid * 0.002;
     }
     if (child.userData.kind === "filament") {
       child.rotation.z += child.userData.speed * 0.012 + metrics.beat * 0.003;
-      child.material.opacity = child.userData.baseOpacity * (0.8 + metrics.mid * 0.6 + modelFocus * 0.18);
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * (0.75 + metrics.mid * 0.38 + modelFocus * 0.1), 0.11);
     }
     if (child.userData.kind === "auroraCurtain") {
       child.position.y = child.userData.baseY + Math.sin(elapsed * child.userData.speed + child.userData.phase) * 0.18;
       child.rotation.z = child.userData.baseRotation + Math.sin(elapsed * 0.08 + child.userData.phase) * 0.035;
-      child.material.opacity = child.userData.baseOpacity * (0.8 + metrics.level * 0.48 + modelFocus * 0.18);
+      child.material.opacity = safeBackgroundOpacity(
+        child.userData.baseOpacity * (0.76 + metrics.level * 0.3 + modelFocus * 0.1),
+        0.12,
+      );
     }
   }
 }
@@ -442,28 +674,28 @@ function updateStage(group, elapsed, metrics, modelFocus) {
   for (const child of group.children) {
     if (child.userData.kind === "stars") {
       child.rotation.y = elapsed * 0.004;
-      child.material.opacity = child.userData.baseOpacity * (0.62 + metrics.treble * 0.42);
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * (0.62 + metrics.treble * 0.26), 0.15);
     }
     if (child.userData.kind === "backdropCurtain") {
       const drift = Math.sin(elapsed * child.userData.speed + child.userData.phase);
       child.scale.copy(child.userData.baseScale).multiplyScalar(1 + drift * 0.04 + metrics.level * 0.04);
       child.position.x += drift * 0.003;
-      child.material.opacity = child.userData.baseOpacity * (0.78 + metrics.level * 0.62 + modelFocus * 0.12);
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * (0.72 + metrics.level * 0.34 + modelFocus * 0.08), 0.17);
     }
     if (child.userData.kind === "beam") {
       const sway = Math.sin(elapsed * child.userData.speed + child.userData.phase);
       child.rotation.z += sway * 0.0008 + metrics.mid * 0.002;
       child.scale.copy(child.userData.baseScale).multiplyScalar(1 + sway * 0.035 + metrics.beat * 0.09);
-      child.material.opacity = child.userData.baseOpacity * (0.82 + metrics.level * 0.74 + modelFocus * 0.15);
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * (0.72 + metrics.level * 0.42 + modelFocus * 0.08), 0.22);
     }
     if (child.userData.kind === "floorGlow") {
       const pulse = 1 + Math.sin(elapsed * child.userData.speed + child.userData.phase) * 0.04 + metrics.kick * 0.12;
       child.scale.copy(child.userData.baseScale).multiplyScalar(pulse);
-      child.material.opacity = child.userData.baseOpacity * (0.8 + metrics.bass * 0.7);
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * (0.74 + metrics.bass * 0.42), 0.18);
     }
     if (child.userData.kind === "stageRing") {
       child.scale.setScalar(1 + Math.sin(elapsed * child.userData.speed + child.userData.phase) * 0.02 + metrics.beat * 0.03);
-      child.material.opacity = child.userData.baseOpacity * (0.72 + metrics.mid * 0.65);
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * (0.68 + metrics.mid * 0.36), 0.12);
     }
   }
 }
@@ -472,12 +704,12 @@ function updateMinimal(group, elapsed, metrics) {
   for (const child of group.children) {
     if (child.userData.kind === "stars") {
       child.rotation.y = elapsed * 0.003;
-      child.material.opacity = child.userData.baseOpacity * (0.75 + metrics.treble * 0.32);
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * (0.72 + metrics.treble * 0.22), 0.1);
     }
     if (child.userData.kind === "minimalHalo") {
       const pulse = 1 + Math.sin(elapsed * child.userData.speed + child.userData.phase) * 0.035 + metrics.kick * 0.08;
       child.scale.copy(child.userData.baseScale).multiplyScalar(pulse);
-      child.material.opacity = child.userData.baseOpacity * (0.72 + metrics.level * 0.38);
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * (0.68 + metrics.level * 0.24), 0.1);
     }
   }
 }
@@ -488,19 +720,83 @@ function updateFireworksSky(group, elapsed, metrics, modelFocus) {
       const drift = Math.sin(elapsed * child.userData.speed + child.userData.phase) * 0.055;
       child.position.x += drift * 0.004;
       child.scale.copy(child.userData.baseScale).multiplyScalar(1 + drift + metrics.level * 0.04);
-      child.material.opacity = child.userData.baseOpacity * (0.82 + metrics.level * 0.5);
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * (0.76 + metrics.level * 0.3), 0.14);
     }
     if (child.userData.kind === "distantBurst") {
       const cycle = (elapsed * child.userData.speed + child.userData.phase) % 1;
       const fade = Math.sin(cycle * Math.PI);
       child.scale.setScalar(child.userData.baseScale * (0.76 + cycle * 1.45 + metrics.beat * 0.18));
       child.rotation.z += 0.0015 + metrics.treble * 0.004;
-      child.material.opacity = child.userData.baseOpacity * fade * (0.65 + metrics.level * 0.75 + modelFocus * 0.2);
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * fade * (0.58 + metrics.level * 0.42 + modelFocus * 0.12), 0.22);
     }
     if (child.userData.kind === "rocketTrail") {
       const cycle = (elapsed * child.userData.speed + child.userData.phase) % 1;
       child.position.y = -0.6 + cycle * 1.4;
-      child.material.opacity = child.userData.baseOpacity * (1 - cycle) * (0.72 + metrics.beat * 0.6);
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * (1 - cycle) * (0.64 + metrics.beat * 0.32), 0.16);
+    }
+  }
+}
+
+function updateAurora(group, elapsed, metrics, modelFocus) {
+  group.rotation.y = Math.sin(elapsed * 0.035) * 0.025;
+  for (const child of group.children) {
+    if (child.userData.kind === "stars") {
+      child.rotation.y = elapsed * 0.0035;
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * (0.68 + metrics.treble * 0.18), 0.14);
+    }
+    if (child.userData.kind === "auroraRibbon") {
+      child.position.y = child.userData.baseY + Math.sin(elapsed * child.userData.speed + child.userData.phase) * 0.16;
+      child.rotation.z = Math.sin(elapsed * 0.06 + child.userData.phase) * 0.035;
+      child.material.opacity = safeBackgroundOpacity(
+        child.userData.baseOpacity * (0.72 + metrics.level * 0.3 + modelFocus * 0.1),
+        0.13,
+      );
+    }
+    if (child.userData.kind === "auroraMist") {
+      const breathe = 1 + Math.sin(elapsed * child.userData.speed + child.userData.phase) * 0.04 + metrics.beat * 0.035;
+      child.scale.copy(child.userData.baseScale).multiplyScalar(breathe);
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * (0.68 + metrics.mid * 0.24), 0.13);
+    }
+  }
+}
+
+function updateLattice(group, elapsed, metrics) {
+  group.rotation.z = Math.sin(elapsed * 0.03) * 0.012;
+  for (const child of group.children) {
+    if (child.userData.kind === "stars") {
+      child.rotation.y = elapsed * 0.0025;
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * (0.62 + metrics.treble * 0.18), 0.11);
+    }
+    if (child.userData.kind === "latticeGrid") {
+      const wave = Math.sin(elapsed * child.userData.speed + child.userData.phase);
+      child.rotation.z = wave * 0.025;
+      child.position.z += Math.sin(elapsed * 0.08 + child.userData.phase) * 0.002;
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * (0.66 + metrics.mid * 0.3 + metrics.beat * 0.08), 0.14);
+    }
+    if (child.userData.kind === "latticeNode") {
+      const pulse = 1 + Math.sin(elapsed * child.userData.speed + child.userData.phase) * 0.06 + metrics.kick * 0.08;
+      child.scale.copy(child.userData.baseScale).multiplyScalar(pulse);
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * (0.62 + metrics.level * 0.22), 0.12);
+    }
+  }
+}
+
+function updateSunset(group, elapsed, metrics) {
+  group.rotation.y = Math.sin(elapsed * 0.025) * 0.018;
+  for (const child of group.children) {
+    if (child.userData.kind === "stars") {
+      child.rotation.y = elapsed * 0.002;
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * (0.55 + metrics.treble * 0.14), 0.1);
+    }
+    if (child.userData.kind === "sunsetCloud") {
+      const drift = Math.sin(elapsed * child.userData.speed + child.userData.phase);
+      child.position.x += drift * 0.0025;
+      child.scale.copy(child.userData.baseScale).multiplyScalar(1 + drift * 0.035 + metrics.level * 0.025);
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * (0.68 + metrics.level * 0.22), 0.14);
+    }
+    if (child.userData.kind === "sunsetHorizon") {
+      child.scale.setScalar(1 + Math.sin(elapsed * child.userData.speed + child.userData.phase) * 0.018 + metrics.beat * 0.02);
+      child.material.opacity = safeBackgroundOpacity(child.userData.baseOpacity * (0.62 + metrics.mid * 0.22), 0.1);
     }
   }
 }
@@ -623,24 +919,25 @@ function createAtmospherePlane(theme, mode, opacity, materials) {
 
         if (uMode < 0.5) {
           float nebula = smoothstep(0.3, 0.92, clouds) * vignette;
-          color = mix(uColorC * 0.42, uColorA, nebula);
-          color += uColorB * ribbon * (0.9 + uAudio * 0.35);
-          color += uRim * star * 0.58;
-          alpha = (nebula * 0.46 + ribbon * 0.52 + star * 0.18) * vignette;
+          color = mix(uColorC * 0.5, uColorA, nebula);
+          color += uColorB * ribbon * (0.7 + uAudio * 0.2);
+          color += uRim * star * 0.42;
+          alpha = (nebula * 0.44 + ribbon * 0.46 + star * 0.16) * vignette;
         } else if (uMode < 1.5) {
           float floorGlow = exp(-abs(p.y + 0.47) * 4.2) * smoothstep(1.04, 0.2, abs(p.x));
-          color = uColorC * clouds * 0.22 + uColorA * stage + uColorB * floorGlow * (0.55 + uAudio * 0.35);
-          color += uRim * star * 0.32;
-          alpha = (stage * 0.78 + floorGlow * 0.34 + clouds * 0.12 + star * 0.12) * vignette;
+          color = uColorC * clouds * 0.2 + uColorA * stage * 0.82 + uColorB * floorGlow * (0.45 + uAudio * 0.2);
+          color += uRim * star * 0.3;
+          alpha = (stage * 0.68 + floorGlow * 0.32 + clouds * 0.12 + star * 0.1) * vignette;
         } else if (uMode < 2.5) {
           float smoke = smoothstep(0.36, 0.88, clouds + p.y * 0.18) * 0.42;
-          color = uColorC * smoke + uColorA * burst * 0.75 + uColorB * (star * 0.65 + burst * 0.35);
-          alpha = (smoke * 0.28 + burst * (0.66 + uAudio * 0.28) + star * 0.18) * vignette;
+          color = uColorC * smoke * 0.82 + uColorA * burst * 0.58 + uColorB * (star * 0.5 + burst * 0.28);
+          alpha = (smoke * 0.3 + burst * (0.58 + uAudio * 0.16) + star * 0.16) * vignette;
         } else {
-          color = uRim * minimal * 0.36 + uColorA * fine * 0.035 + uRim * star * 0.16;
-          alpha = (minimal * 0.28 + star * 0.08) * vignette;
+          color = uRim * minimal * 0.46 + uColorA * fine * 0.045 + uRim * star * 0.22;
+          alpha = (minimal * 0.34 + star * 0.11) * vignette;
         }
 
+        color = color / (vec3(1.0) + max(color - vec3(0.72), vec3(0.0)) * 0.32);
         gl_FragColor = vec4(color, alpha * uOpacity);
       }
     `,
@@ -734,6 +1031,27 @@ function createSpiralGeometry(segments, startRadius, endRadius, phase) {
   return new THREE.BufferGeometry().setFromPoints(points);
 }
 
+function createLatticeGeometry(layer) {
+  const points = [];
+  const width = 7.6 + layer * 0.5;
+  const height = 4.2 + layer * 0.18;
+  const rows = 5;
+  const columns = 8;
+  for (let row = 0; row <= rows; row += 1) {
+    const y = -height / 2 + (row / rows) * height;
+    points.push(new THREE.Vector3(-width / 2, y, 0), new THREE.Vector3(width / 2, y, 0));
+  }
+  for (let column = 0; column <= columns; column += 1) {
+    const x = -width / 2 + (column / columns) * width;
+    points.push(new THREE.Vector3(x, -height / 2, 0), new THREE.Vector3(x, height / 2, 0));
+  }
+  for (let diagonal = 0; diagonal < 4; diagonal += 1) {
+    const offset = -width * 0.35 + diagonal * width * 0.23;
+    points.push(new THREE.Vector3(offset, -height / 2, 0), new THREE.Vector3(offset + width * 0.36, height / 2, 0));
+  }
+  return new THREE.BufferGeometry().setFromPoints(points);
+}
+
 function createEllipseGeometry(segments, width, height, y) {
   const points = [];
   for (let i = 0; i <= segments; i += 1) {
@@ -771,6 +1089,13 @@ function colorForRole(theme, role, mix = 0.5) {
   if (role === "haze") return haze.lerp(primary, 0.22 + mix * 0.22);
   if (role === "rim") return rim.lerp(accent, 0.16 + mix * 0.16);
   return primary.clone().lerp(accent, mix);
+}
+
+function safeBackgroundOpacity(value, cap = 0.16) {
+  return Math.min(
+    value * BACKGROUND_GAIN * runtimeBackgroundBrightness,
+    cap * BACKGROUND_CAP_GAIN * Math.max(0.65, runtimeBackgroundBrightness),
+  );
 }
 
 function normalizeAudio(audio) {

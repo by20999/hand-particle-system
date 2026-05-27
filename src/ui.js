@@ -25,12 +25,42 @@ export function createUI() {
     themeSelect: document.querySelector("#themeSelect"),
     showPresetSelect: document.querySelector("#showPresetSelect"),
     showPresetToggleBtn: document.querySelector("#showPresetToggleBtn"),
+    showTimeline: document.querySelector("#showTimeline"),
+    showStepLabel: document.querySelector("#showStepLabel"),
+    showStepDuration: document.querySelector("#showStepDuration"),
+    showStepTheme: document.querySelector("#showStepTheme"),
+    showStepBackground: document.querySelector("#showStepBackground"),
+    showStepModel: document.querySelector("#showStepModel"),
+    showStepText: document.querySelector("#showStepText"),
+    showStepCamera: document.querySelector("#showStepCamera"),
+    showStepModelBrightness: document.querySelector("#showStepModelBrightness"),
+    showStepModelBrightnessValue: document.querySelector("#showStepModelBrightnessValue"),
+    showStepBackgroundBrightness: document.querySelector("#showStepBackgroundBrightness"),
+    showStepBackgroundBrightnessValue: document.querySelector("#showStepBackgroundBrightnessValue"),
+    showStepImageBrightness: document.querySelector("#showStepImageBrightness"),
+    showStepImageBrightnessValue: document.querySelector("#showStepImageBrightnessValue"),
+    showStepImageSize: document.querySelector("#showStepImageSize"),
+    showStepImageSizeValue: document.querySelector("#showStepImageSizeValue"),
+    showStepBurst: document.querySelector("#showStepBurst"),
+    showStepFreeze: document.querySelector("#showStepFreeze"),
+    showStepApplyBtn: document.querySelector("#showStepApplyBtn"),
+    showStepCaptureBtn: document.querySelector("#showStepCaptureBtn"),
+    showStepAddBtn: document.querySelector("#showStepAddBtn"),
+    showStepDuplicateBtn: document.querySelector("#showStepDuplicateBtn"),
+    showStepDeleteBtn: document.querySelector("#showStepDeleteBtn"),
+    showStepExportBtn: document.querySelector("#showStepExportBtn"),
+    showStepImportBtn: document.querySelector("#showStepImportBtn"),
+    showStepFileImportBtn: document.querySelector("#showStepFileImportBtn"),
+    showPresetFileInput: document.querySelector("#showPresetFileInput"),
+    showStepJson: document.querySelector("#showStepJson"),
     gestureToggleBtn: document.querySelector("#gestureToggleBtn"),
     freezeToggleBtn: document.querySelector("#freezeToggleBtn"),
     colorPicker: document.querySelector("#colorPicker"),
     fullscreenBtn: document.querySelector("#fullscreenBtn"),
     statusText: document.querySelector("#statusText"),
     diagnosticText: document.querySelector("#diagnosticText"),
+    helpText: document.querySelector("#helpText"),
+    helpButtons: [...document.querySelectorAll(".help-button")],
     cameraStatus: document.querySelector("#cameraStatus"),
     gestureMeter: document.querySelector("#gestureMeter"),
     gestureValue: document.querySelector("#gestureValue"),
@@ -42,6 +72,12 @@ export function createUI() {
     sensitivityValue: document.querySelector("#sensitivityValue"),
     themeButtons: [...document.querySelectorAll("[data-theme]")],
     backgroundButtons: [...document.querySelectorAll("[data-background]")],
+    backgroundSelect: document.querySelector("#backgroundSelect"),
+    backgroundBrightness: document.querySelector("#backgroundBrightness"),
+    backgroundBrightnessValue: document.querySelector("#backgroundBrightnessValue"),
+    modelPlaceholderButtons: [...document.querySelectorAll("[data-model-placeholder]")],
+    modelBrightness: document.querySelector("#modelBrightness"),
+    modelBrightnessValue: document.querySelector("#modelBrightnessValue"),
     micToggleBtn: document.querySelector("#micToggleBtn"),
     audioFileInput: document.querySelector("#audioFileInput"),
     imageFileInput: document.querySelector("#imageFileInput"),
@@ -52,9 +88,17 @@ export function createUI() {
     imageMonoColor: document.querySelector("#imageMonoColor"),
     imageAlpha: document.querySelector("#imageAlpha"),
     imageAlphaValue: document.querySelector("#imageAlphaValue"),
+    imageBrightness: document.querySelector("#imageBrightness"),
+    imageBrightnessValue: document.querySelector("#imageBrightnessValue"),
+    imageSize: document.querySelector("#imageSize"),
+    imageSizeValue: document.querySelector("#imageSizeValue"),
     imageLogoMode: document.querySelector("#imageLogoMode"),
     imageInteriorRatio: document.querySelector("#imageInteriorRatio"),
     imageInteriorRatioValue: document.querySelector("#imageInteriorRatioValue"),
+    importProgress: document.querySelector("#importProgress"),
+    importProgressLabel: document.querySelector("#importProgressLabel"),
+    importProgressValue: document.querySelector("#importProgressValue"),
+    importProgressFill: document.querySelector("#importProgressFill"),
     audioStopBtn: document.querySelector("#audioStopBtn"),
     audioValue: document.querySelector("#audioValue"),
     audioSpectrum: document.querySelector("#audioSpectrum"),
@@ -62,13 +106,16 @@ export function createUI() {
 
   initIcons(refs);
   initThemeButtons(refs);
+  initShowComposer(refs);
   initPanelScale(refs);
   initPanelCollapse(refs);
   initPanelVisibility(refs);
   initSensitivity(refs);
   initTextFont(refs);
   initImageOptions(refs);
+  initBrightnessControls(refs);
   initAudioSpectrum(refs);
+  initHelpButtons(refs);
 
   return {
     refs,
@@ -87,8 +134,23 @@ export function createUI() {
     getCustomText: () => normalizeCustomText(refs.textInput.value),
     getTextFontId: () => refs.textFontSelect?.value ?? "modern",
     getImageOptions: () => getImageOptions(refs),
+    getImageBrightness: () => Number(refs.imageBrightness?.value ?? 280) / 100,
+    getImageSize: () => Number(refs.imageSize?.value ?? 100) / 100,
+    getModelBrightness: () => Number(refs.modelBrightness?.value ?? 100) / 100,
+    getBackgroundBrightness: () => Number(refs.backgroundBrightness?.value ?? 100) / 100,
+    updateImageSizeLabel: (particleCount) => updateImageSizeLabel(refs, particleCount),
     getShowPresetId: () => refs.showPresetSelect?.value ?? "auto",
+    setShowPresetOptions: (presets) => setShowPresetOptions(refs, presets),
+    setShowPresetId: (id) => setShowPresetId(refs, id),
     setShowPresetActive: (active) => setShowPresetActive(refs, active),
+    getShowStepDraft: () => getShowStepDraft(refs),
+    setShowStepDraft: (step) => setShowStepDraft(refs, step),
+    renderShowTimeline: (preset, activeIndex, selectedIndex) => renderShowTimeline(refs, preset, activeIndex, selectedIndex),
+    getShowJson: () => refs.showStepJson?.value ?? "",
+    setShowJson: (text) => {
+      if (refs.showStepJson) refs.showStepJson.value = text;
+    },
+    setImportProgress: (progress) => setImportProgress(refs, progress),
     setAudioActive: (mode) => setAudioActive(refs, mode),
     updateAudioLevel: (level) => updateAudioLevel(refs, level),
     getSensitivity: () => Number(refs.sensitivity.value) / 100,
@@ -124,6 +186,135 @@ function initThemeButtons(refs) {
     button.style.setProperty("--swatch-primary", theme.primary);
     button.style.setProperty("--swatch-secondary", theme.accent);
   }
+}
+
+function initShowComposer(refs) {
+  if (refs.showStepTheme) {
+    refs.showStepTheme.replaceChildren(
+      ...THEMES.map((theme) => {
+        const option = document.createElement("option");
+        option.value = theme.id;
+        option.textContent = theme.label;
+        return option;
+      }),
+    );
+  }
+
+  const controls = [
+    { input: refs.showStepModelBrightness, output: refs.showStepModelBrightnessValue },
+    { input: refs.showStepBackgroundBrightness, output: refs.showStepBackgroundBrightnessValue },
+    { input: refs.showStepImageBrightness, output: refs.showStepImageBrightnessValue },
+    { input: refs.showStepImageSize, output: refs.showStepImageSizeValue },
+  ];
+
+  for (const control of controls) {
+    if (!control.input) continue;
+    updatePercentLabel(control.output, control.input.value);
+    control.input.addEventListener("input", () => updatePercentLabel(control.output, control.input.value));
+  }
+}
+
+function setShowPresetId(refs, id) {
+  if (!refs.showPresetSelect) return;
+  const hasOption = [...refs.showPresetSelect.options].some((option) => option.value === id);
+  refs.showPresetSelect.value = hasOption ? id : "auto";
+}
+
+function setShowPresetOptions(refs, presets) {
+  if (!refs.showPresetSelect || !Array.isArray(presets)) return;
+  const previous = refs.showPresetSelect.value || "auto";
+  refs.showPresetSelect.replaceChildren(
+    ...presets.map((preset) => {
+      const option = document.createElement("option");
+      option.value = preset.id;
+      option.textContent = preset.label;
+      return option;
+    }),
+  );
+  setShowPresetId(refs, previous);
+}
+
+function getShowStepDraft(refs) {
+  return {
+    label: normalizeShowLabel(refs.showStepLabel?.value),
+    duration: Math.round(Number(refs.showStepDuration?.value ?? 10) * 1000),
+    theme: refs.showStepTheme?.value ?? "neon",
+    background: refs.showStepBackground?.value ?? "nebula",
+    model: refs.showStepModel?.value ?? "heart",
+    text: normalizeCustomText(refs.showStepText?.value ?? "LOVE"),
+    camera: refs.showStepCamera?.value ?? "hold",
+    modelBrightness: Number(refs.showStepModelBrightness?.value ?? 100) / 100,
+    backgroundBrightness: Number(refs.showStepBackgroundBrightness?.value ?? 100) / 100,
+    imageBrightness: Number(refs.showStepImageBrightness?.value ?? 280) / 100,
+    imageSize: Number(refs.showStepImageSize?.value ?? 100) / 100,
+    burst: Boolean(refs.showStepBurst?.checked),
+    freeze: Boolean(refs.showStepFreeze?.checked),
+  };
+}
+
+function setShowStepDraft(refs, step = {}) {
+  if (refs.showStepLabel) refs.showStepLabel.value = normalizeShowLabel(step.label);
+  if (refs.showStepDuration) refs.showStepDuration.value = formatSeconds(step.duration ?? 10000);
+  setSelectValue(refs.showStepTheme, step.theme ?? "neon");
+  setSelectValue(refs.showStepBackground, step.background ?? "nebula");
+  setSelectValue(refs.showStepModel, step.model ?? "heart");
+  if (refs.showStepText) refs.showStepText.value = normalizeCustomText(step.text ?? "LOVE");
+  setSelectValue(refs.showStepCamera, typeof step.camera === "string" ? step.camera : "hold");
+  setComposerRange(refs.showStepModelBrightness, refs.showStepModelBrightnessValue, step.modelBrightness ?? 1);
+  setComposerRange(refs.showStepBackgroundBrightness, refs.showStepBackgroundBrightnessValue, step.backgroundBrightness ?? 1);
+  setComposerRange(refs.showStepImageBrightness, refs.showStepImageBrightnessValue, step.imageBrightness ?? 2.8);
+  setComposerRange(refs.showStepImageSize, refs.showStepImageSizeValue, step.imageSize ?? 1);
+  if (refs.showStepBurst) refs.showStepBurst.checked = Boolean(step.burst);
+  if (refs.showStepFreeze) refs.showStepFreeze.checked = Boolean(step.freeze);
+}
+
+function renderShowTimeline(refs, preset, activeIndex = -1, selectedIndex = 0) {
+  if (!refs.showTimeline) return;
+  const steps = Array.isArray(preset?.steps) ? preset.steps : [];
+  refs.showTimeline.replaceChildren(
+    ...steps.map((step, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "show-timeline-item";
+      button.dataset.showStep = String(index);
+      button.classList.toggle("is-active", index === activeIndex);
+      button.classList.toggle("is-selected", index === selectedIndex);
+
+      const title = document.createElement("span");
+      title.textContent = step.label || `片段 ${index + 1}`;
+      const meta = document.createElement("small");
+      meta.textContent = `${Math.round((Number(step.duration) || 10000) / 1000)}s`;
+      button.append(title, meta);
+      return button;
+    }),
+  );
+}
+
+function setSelectValue(select, value) {
+  if (!select) return;
+  const hasOption = [...select.options].some((option) => option.value === value);
+  select.value = hasOption ? value : select.options[0]?.value;
+}
+
+function setComposerRange(input, output, ratio) {
+  if (!input) return;
+  const min = Number(input.min);
+  const max = Number(input.max);
+  const value = THREE.MathUtils.clamp(Math.round(Number(ratio) * 100), min, max);
+  input.value = String(value);
+  updatePercentLabel(output, value);
+}
+
+function formatSeconds(duration) {
+  const value = Number(duration);
+  const milliseconds = value > 0 && value <= 120 ? value * 1000 : value;
+  const seconds = THREE.MathUtils.clamp((Number.isFinite(milliseconds) ? milliseconds : 10000) / 1000, 2, 120);
+  return Number.isInteger(seconds) ? String(seconds) : seconds.toFixed(1);
+}
+
+function normalizeShowLabel(label) {
+  const trimmed = String(label ?? "").trim();
+  return trimmed.length > 0 ? trimmed.slice(0, 18) : "新片段";
 }
 
 function initPanelScale(refs) {
@@ -229,6 +420,46 @@ function initImageOptions(refs) {
   update();
 }
 
+function initBrightnessControls(refs) {
+  const controls = [
+    { input: refs.imageBrightness, output: refs.imageBrightnessValue, storage: "imageBrightness", fallback: 280 },
+    { input: refs.imageSize, output: refs.imageSizeValue, storage: "imageSize", fallback: 100 },
+    { input: refs.modelBrightness, output: refs.modelBrightnessValue, storage: "modelBrightness", fallback: 100 },
+    { input: refs.backgroundBrightness, output: refs.backgroundBrightnessValue, storage: "backgroundBrightness", fallback: 100 },
+  ];
+
+  for (const control of controls) {
+    if (!control.input) continue;
+    const saved = Number(safeReadStorage(control.storage));
+    const min = Number(control.input.min);
+    const max = Number(control.input.max);
+    const value = Number.isFinite(saved) && saved >= min && saved <= max ? saved : control.fallback;
+    control.input.value = String(value);
+    updatePercentLabel(control.output, value);
+    control.input.addEventListener("input", () => {
+      const nextValue = Number(control.input.value);
+      updatePercentLabel(control.output, nextValue);
+      safeWriteStorage(control.storage, String(nextValue));
+    });
+  }
+}
+
+function updatePercentLabel(output, value) {
+  if (output) {
+    output.textContent = `${Math.round(Number(value))}%`;
+  }
+}
+
+function updateImageSizeLabel(refs, particleCount) {
+  if (!refs.imageSizeValue || !refs.imageSize) return;
+  const size = Math.round(Number(refs.imageSize.value));
+  if (Number.isFinite(particleCount) && particleCount > 0) {
+    refs.imageSizeValue.textContent = `${size}% · ${Math.round(particleCount / 1000)}k`;
+    return;
+  }
+  refs.imageSizeValue.textContent = `${size}%`;
+}
+
 function getImageOptions(refs) {
   return {
     contourStrength: Number(refs.imageContour?.value ?? 0.75),
@@ -248,6 +479,31 @@ function initAudioSpectrum(refs) {
     bar.style.setProperty("--bar-index", String(i));
     refs.audioSpectrum.append(bar);
     refs.audioBars.push(bar);
+  }
+}
+
+function initHelpButtons(refs) {
+  for (const button of refs.helpButtons) {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const text = button.dataset.help ?? "";
+      const isActive = button.classList.contains("is-active");
+      for (const item of refs.helpButtons) {
+        item.classList.remove("is-active");
+        item.setAttribute("aria-expanded", "false");
+      }
+      if (!refs.helpText) return;
+      if (isActive || !text) {
+        refs.helpText.hidden = true;
+        refs.helpText.textContent = "";
+        return;
+      }
+      button.classList.add("is-active");
+      button.setAttribute("aria-expanded", "true");
+      refs.helpText.textContent = text;
+      refs.helpText.hidden = false;
+    });
   }
 }
 
@@ -282,6 +538,9 @@ function setThemeActive(refs, themeId) {
 }
 
 function setBackgroundActive(refs, mode) {
+  if (refs.backgroundSelect) {
+    refs.backgroundSelect.value = mode;
+  }
   for (const button of refs.backgroundButtons) {
     button.classList.toggle("is-active", button.dataset.background === mode);
   }
@@ -320,6 +579,19 @@ function setShowPresetActive(refs, active) {
   if (refs.showPresetToggleBtn) {
     refs.showPresetToggleBtn.textContent = active ? "停止" : "巡演";
   }
+}
+
+function setImportProgress(refs, progress) {
+  if (!refs.importProgress) return;
+  const active = Boolean(progress?.active);
+  refs.importProgress.hidden = !active;
+  refs.importProgress.classList.toggle("is-error", Boolean(progress?.error));
+  if (!active) return;
+  const value = THREE.MathUtils.clamp(Number(progress?.value ?? 0), 0, 1);
+  const label = progress?.label ?? "正在导入";
+  refs.importProgressLabel.textContent = label;
+  refs.importProgressValue.textContent = progress?.indeterminate ? "--" : `${Math.round(value * 100)}%`;
+  refs.importProgressFill.style.width = progress?.indeterminate ? "38%" : `${Math.round(value * 100)}%`;
 }
 
 function updateAudioLevel(refs, audio) {

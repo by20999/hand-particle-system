@@ -64,6 +64,7 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
   if (simUvs) {
     geometry.setAttribute("aSimUv", new THREE.BufferAttribute(simUvs, 2));
   }
+  geometry.setDrawRange(0, count);
 
   const simulation = fboSimulation ? createFboSimulation(count, simSize, positions, targets) : null;
 
@@ -91,6 +92,8 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
       uModelType: { value: 0 },
       uPointer: { value: new THREE.Vector3(0, 0, 0) },
       uUseVertexColor: { value: 0 },
+      uModelBrightness: { value: 1 },
+      uImageBrightness: { value: 1 },
       ...(fboSimulation
         ? {
             uSimPosition: { value: simulation.currentTexture },
@@ -218,7 +221,7 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
         #endif
         vec4 mvPosition = modelViewMatrix * vec4(target, 1.0);
         float pulse = 0.78 + 0.22 * sin(uTime * 2.0 + aRandom * 8.0);
-        float sizeBrightness = 0.62 + clamp(vBrightness, 0.08, 2.2) * 0.28;
+        float sizeBrightness = 0.6 + clamp(vBrightness, 0.08, 1.9) * 0.25;
         gl_PointSize = uPointSize * pulse * sizeBrightness * uPixelRatio / max(0.45, -mvPosition.z);
         gl_Position = projectionMatrix * mvPosition;
       }
@@ -231,6 +234,8 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
       uniform vec3 uColor;
       uniform vec3 uAccent;
       uniform float uUseVertexColor;
+      uniform float uModelBrightness;
+      uniform float uImageBrightness;
 
       void main() {
         vec2 uv = gl_PointCoord - vec2(0.5);
@@ -238,11 +243,28 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
         float alpha = smoothstep(0.5, 0.0, d);
         float core = smoothstep(0.18, 0.0, d);
         vec3 palette = mix(uColor, uAccent, vColorMix * 0.55);
-        vec3 color = mix(palette, vParticleColor.rgb, uUseVertexColor);
-        color += core * mix(0.85, 0.34, uUseVertexColor);
-        color *= vBrightness;
-        float vertexAlpha = mix(1.0, vParticleColor.a, uUseVertexColor);
-        gl_FragColor = vec4(color, alpha * vertexAlpha * (0.72 + vRandom * 0.38) * clamp(vBrightness, 0.25, 1.65));
+        float imageMask = clamp(uUseVertexColor, 0.0, 1.0);
+        float imageBrightness = clamp(uImageBrightness, 0.45, 5.2);
+        vec3 imageColor = clamp(vParticleColor.rgb, vec3(0.0), vec3(1.0));
+        float imageLuma = dot(imageColor, vec3(0.2126, 0.7152, 0.0722));
+        float shadowMask = (1.0 - smoothstep(0.06, 0.52, imageLuma)) * uUseVertexColor;
+        vec3 imageChroma = imageColor / max(max(imageColor.r, max(imageColor.g, imageColor.b)), 0.12);
+        vec3 correctedImage = imageColor + imageChroma * shadowMask * clamp((imageBrightness - 1.0) * 0.1, 0.0, 0.34);
+        correctedImage = mix(
+          correctedImage,
+          sqrt(max(correctedImage, vec3(0.0))),
+          clamp((imageBrightness - 1.0) * 0.08, 0.0, 0.16) * imageMask
+        );
+        float imageGain = 0.84 + pow(imageBrightness, 0.58) * 0.54;
+        vec3 modelColor = palette + core * 0.4;
+        vec3 imageOut = correctedImage * imageGain + core * 0.018;
+        vec3 color = mix(modelColor, imageOut, imageMask);
+        color *= mix(clamp(vBrightness, 0.2, 1.48), clamp(vBrightness, 0.58, 1.32), imageMask);
+        color *= clamp(uModelBrightness, 0.35, 2.4);
+        color = color / (vec3(1.0) + max(color - vec3(0.92), vec3(0.0)) * mix(0.36, 0.48, imageMask));
+        float vertexAlpha = mix(1.0, vParticleColor.a, imageMask);
+        float alphaBoost = clamp(sqrt(max(uModelBrightness, 0.1)) * mix(1.0, pow(max(imageBrightness, 0.1), 0.22), imageMask), 0.42, 1.78);
+        gl_FragColor = vec4(color, alpha * vertexAlpha * (0.58 + vRandom * 0.3) * clamp(vBrightness, 0.24, 1.26) * alphaBoost);
       }
     `,
   });
@@ -274,6 +296,7 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
     depthSigns,
     gpuDriven: true,
     simulation,
+    visibleCount: count,
   };
 }
 
@@ -325,6 +348,12 @@ export function setMeshPoints(particles, points) {
   setParticleTargets(particles, "mesh");
 }
 
+export function setParticleDrawCount(particles, visibleCount) {
+  const count = Math.max(1, Math.min(particles.count, Math.round(visibleCount)));
+  particles.visibleCount = count;
+  particles.geometry.setDrawRange(0, count);
+}
+
 export function snapParticlesToTargets(particles) {
   if (particles.gpuDriven) {
     return;
@@ -374,6 +403,9 @@ export function updateParticles(particles, state, options) {
   const isImageModel = state.model === "image";
   const isFlowerModel = state.model === "flower";
   const isFireworksModel = state.model === "fireworks";
+  const modelBrightness = THREE.MathUtils.clamp(state.modelBrightness ?? 1, 0.35, 2.4);
+  const imageBrightness = isImageModel ? THREE.MathUtils.clamp(state.imageBrightness ?? 2.8, 0.45, 5.2) : 1;
+  const imageScale = isImageModel ? THREE.MathUtils.clamp(state.imageSize ?? 1, 0.45, 1) : 1;
   const rawShapeGesture = handActive ? g : Math.min(g, 0.34 + state.pointerBoost * 0.18);
   const shapeGesture = isFireworksModel ? Math.min(rawShapeGesture, 0.42) : rawShapeGesture;
   const musicShapeDrive = isFireworksModel ? 0.18 : 0.22;
@@ -385,7 +417,7 @@ export function updateParticles(particles, state, options) {
   );
   const musicTransient = Math.min(1, musicImpact * 0.38 + Math.max(0, bassLevel - audioLevel * 0.62) * 0.16);
   const musicShimmer = Math.min(1, THREE.MathUtils.smoothstep(trebleLevel, 0.34, 0.88) * 0.62 + midLevel * 0.05);
-  const baseModelScale = isTextModel ? 0.62 : isImageModel ? 0.84 : isFireworksModel ? 0.72 : isFlowerModel ? 0.62 : 0.72;
+  const baseModelScale = isTextModel ? 0.62 : isImageModel ? 0.84 * imageScale : isFireworksModel ? 0.72 : isFlowerModel ? 0.62 : 0.72;
   const gestureScale = isTextModel ? 1.72 : isFireworksModel ? 0.22 : 2.38;
   const modelScale = MODEL_SCALE * (baseModelScale + shapeGesture * gestureScale) * (1 + musicTransient * 0.045);
   const diffusion = recovering
@@ -435,22 +467,29 @@ export function updateParticles(particles, state, options) {
   material.uniforms.uMusicShimmer.value = musicShimmer;
   material.uniforms.uFireworkExplosion.value = fireworkExplosion;
   material.uniforms.uModelType.value = isTextModel ? 4 : isFireworksModel ? 3 : isFlowerModel ? 1 : state.model === "saturn" ? 2 : 0;
+  material.uniforms.uModelBrightness.value = modelBrightness;
+  material.uniforms.uImageBrightness.value = imageBrightness;
   material.uniforms.uPointer.value.lerp(pointerDirection, 0.18);
 
-  const bloomToneDown = isImageModel ? 0.58 : isTextModel ? 0.78 : 1;
-  bloomPass.strength =
-    (0.42 +
-      shapeGesture * 0.22 +
-      transitionBoost * 0.18 +
-      musicImpact * 0.34 +
-      musicShimmer * 0.04 +
-      (isFireworksModel ? fireworkExplosion * 0.68 : 0)) *
-    bloomToneDown;
+  const bloomToneDown = isImageModel ? 0.48 : isTextModel ? 0.6 : isFireworksModel ? 0.76 : 0.7;
+  const brightnessBloom = THREE.MathUtils.clamp(modelBrightness * (isImageModel ? Math.pow(imageBrightness, 0.32) : 1), 0.62, 1.9);
+  const rawBloom =
+    (0.3 +
+      shapeGesture * 0.16 +
+      transitionBoost * 0.12 +
+      musicImpact * 0.2 +
+      musicShimmer * 0.025 +
+      (isFireworksModel ? fireworkExplosion * 0.34 : 0)) *
+    bloomToneDown *
+    brightnessBloom;
+  bloomPass.strength = THREE.MathUtils.clamp(rawBloom, 0.18, isImageModel ? 0.9 : isFireworksModel ? 0.76 : 0.68);
+  const imagePointBoost = isImageModel ? 0.9 + imageScale * 0.18 + Math.min(imageBrightness, 4.2) * 0.045 : 1;
   material.uniforms.uPointSize.value =
-    (isTextModel ? 12.4 : isImageModel ? 10.6 : isFireworksModel ? 7.4 : 18) +
-    shapeGesture * (isTextModel ? 2.4 : isImageModel ? 1.4 : isFireworksModel ? 1.1 : 5) +
-    musicImpact * (isImageModel ? 1.8 : isFireworksModel ? 3.1 : 4.2) +
-    (isFireworksModel ? fireworkExplosion * 6.2 : 0);
+    ((isTextModel ? 11.8 : isImageModel ? 10.8 : isFireworksModel ? 6.5 : 16.4) +
+      shapeGesture * (isTextModel ? 1.9 : isImageModel ? 1.0 : isFireworksModel ? 0.75 : 3.6) +
+      musicImpact * (isImageModel ? 1.1 : isFireworksModel ? 1.9 : 2.8) +
+      (isFireworksModel ? fireworkExplosion * 3.4 : 0)) *
+    imagePointBoost;
   updateFboSimulation(particles, options.renderer, {
     delta,
     elapsed,

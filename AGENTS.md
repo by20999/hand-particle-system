@@ -26,9 +26,10 @@
 - 手势控制：张开手掌扩散，收拢/握拳聚回，拳头旋转控制视角，食指指向让模型朝指向方向移动。
 - 注意：所有“手势切换模型”目前已关闭，OK/比心不再触发切换。
 - 音乐响应：支持麦克风和本地音频文件，驱动模型缩放、位移、旋转、拖尾、Bloom 和底部频谱条。
-- 图片/Logo 转粒子：支持边缘优先采样、Logo 二值模式、原色/灰度/单色、透明度、轮廓增强、内部采样比例，并优先走 `src/image-worker.js` Worker 采样。
+- 图片/Logo 转粒子：支持边缘、局部颜色/明暗细节联合采样、Logo 二值模式、原色/灰度/单色、透明度、轮廓增强、内部采样比例、图片亮度和图片大小，并优先走 `src/image-worker.js` Worker 高密度采样。
 - GLB 转粒子：上传 `.glb` 后按三角面面积采样模型表面，生成 3D 粒子点云；顶点色会尽量保留。
-- 控制：主题、背景、演出巡演、手势开关、静止按钮、面板缩放、图片采样参数、文字字体等。
+- 控制：分层控制面板、主题、背景、更多背景、背景亮度、模型亮度、演出巡演、可视化演出编排器、导入进度、帮助说明、手势开关、静止按钮、面板缩放、图片采样参数、文字字体等。
+- 演出预设：除 `src/main.js` 内置基础预设外，扩展演出放在 `src/show-presets/`，当前包含“星河心动现场”；运行时也可通过面板文件导入或 `window.handParticleShows.importPreset()` 导入 JSON。
 
 ## 运行与验证
 
@@ -67,16 +68,17 @@ npm run check
 ## 关键文件
 
 - `index.html`：控制面板和页面结构。
-- `src/main.js`：Three.js 场景、主循环、事件绑定、图片采样、GLB 采样、手势接入、音乐轨迹。
+- `src/main.js`：Three.js 场景、主循环、事件绑定、图片采样、GLB 采样、手势接入、音乐轨迹和演出时间线逻辑。
 - `src/particles.js`：粒子 BufferGeometry、shader、GPU attribute/uniform 更新和可选 FBO 位置纹理模拟，是性能核心。
 - `src/shapes.js`：爱心、花朵、土星、烟花、文字、通用点云目标点生成。
 - `src/gestures.js`：手势张合、拳头视角、OK/比心/食指指向识别。OK/比心识别保留，但不触发切模型。
 - `src/image-worker.js`：图片/Logo Worker 采样，减少大图导入时主线程卡顿。
 - `src/audio.js`：麦克风/音频文件分析、频谱条数据、beat/kick/onset 等音乐特征。
-- `src/ui.js`：控制面板引用、状态更新、主题/字体/图片参数/音频条 UI。
+- `src/ui.js`：控制面板引用、状态更新、主题/字体/图片参数/演出编排器/音频条 UI。
 - `src/styles.css`：面板、模型按钮、音频条、主题视觉样式。
 - `src/themes.js`：主题配色和 CSS 变量同步。
-- `src/backgrounds.js`：星云、舞台、黑场、烟花夜空背景。
+- `src/backgrounds.js`：星云、舞台、黑场、烟花夜空、极光帷幕、光网隧道、日落霓霞背景。
+- `src/show-presets/`：可随应用打包的演出 JSON 预设目录。
 - `README.md`：用户向说明。
 - `更新文档.md`：历史更新记录。
 - `AGENTS.md`：新对话接手说明，也就是本文件。
@@ -101,19 +103,23 @@ npm run check
 - 花朵要自然、包裹、有真实玫瑰的非规则层次，不要规则分层。
 - 烟花要分组清晰、花状绽放、有空间层次，不要所有烟花糊在一起。
 - 图片/Logo 要尽量还原原图，减少过曝，保留轮廓和内部纹理。
+- 光效要有舞台感但避免大面积白爆；改 Bloom、shader 白芯、背景 opacity 或光源时要优先保留模型辨识度。
 
 ## 图片/Logo 采样现状
 
 图片采样由 `src/main.js` 的 `createImagePointCloud` 调度，优先交给 `src/image-worker.js` 执行，Worker 不可用或失败时回退到主线程：
 
 - 使用 `createImageBitmap` 读取图片。
-- 透明度低于 128 的像素会被忽略。
+- 普通图片透明度很低的像素会被忽略；Logo 模式会使用更高的透明度阈值。
 - 灰度化后做 3x3 高斯模糊。
-- 用 Sobel 梯度和局部对比度做自适应采样。
-- 普通图片模式保留强边缘，也会保留内部纹理。
+- 用 Sobel 梯度、局部明暗对比、局部颜色对比和色彩饱和度做自适应采样。
+- 普通图片模式不再过度偏向强边缘，会保留更多内部纹理和颜色变化。
 - Logo 模式使用 Otsu 阈值，并自动判断黑/白前景。
-- 输出点数约为当前画质粒子数的 `1.22` 倍，再由粒子系统按随机映射填充。
+- 输出采样池按画质档位约为当前粒子数的 `2.8` 到 `3.6` 倍，`ultra` 最高约 `2.4M` 个采样点。
 - 图片粒子使用 `aParticleColor` 顶点颜色直接传 RGBA。
+- 图片原色按接近浏览器显示的色彩空间传入 shader，避免少量颜色因线性转换出现偏差；shader 只做保色提亮、阴影补光和可控白芯。
+- 图片大小滑条会缩放图片点云，并通过 `setParticleDrawCount` 同步调整可见粒子数；滑到最大时使用当前画质档的全部粒子。
+- `writePointCloudTargets` 会在采样点数量高于渲染粒子数时做均匀覆盖映射，减少随机抽样造成的局部缺点和重复点。
 - 点击“图片”或“3D”模型但尚未导入资源时，会提示并打开对应文件选择器，不会切到空点云。
 
 如果用户反馈图片上传无反应，优先检查：
@@ -137,6 +143,18 @@ npm run check
 - 每帧主要更新 uniform，而不是 CPU 遍历所有粒子位置。
 
 注意：当前基础路径是 WebGL 顶点 shader 驱动；桌面能力足够时会启用 `src/particles.js` 内的 FBO ping-pong 位置纹理层，由 `src/main.js` 的 `shouldUseFboSimulation` 做能力判断。它仍不是 WebGPU compute，后续如果继续追求极限性能，可以再做 WebGPU 模拟。
+
+## 演出编排器现状
+
+演出系统由 `src/main.js` 的 `SHOW_PRESETS`、自定义编排本地存储和 `updateShowPreset` / `applyShowStep` 驱动：
+
+- 内置/注册预设包含自动巡演、玫瑰告白、夜场烟花、图形展台和 `src/show-presets/stellar-heart-live.json` 的“星河心动现场”。
+- `customShowPreset` 保存在浏览器 localStorage，支持 JSON 导入/导出。
+- 面板支持从 `.json` 文件导入到自定义编排；页面也暴露 `window.handParticleShows.importPreset(preset)`、`list()`、`current()`、`play(id)`、`stop()`。
+- step 支持 `label`、`duration`、`theme`、`background`、`model`、`text`、`modelBrightness`、`backgroundBrightness`、`imageBrightness`、`imageSize`、`camera`、`cameraDuration`、`burst`、`freeze`。
+- `camera` 支持 `hold`、`front`、`close`、`wide`、`left`、`right`、`top`、`low`，也兼容带 `position` / `target` 数组的 JSON。
+- `freeze` 会先留出短暂过渡时间再定格，时间线仍可继续推进到下一段；手动“静止”会暂停巡演推进。
+- 编辑内置预设时，点击应用/新增/复制/删除/捕获会复制到“自定义编排”，不会改动内置模板。
 
 ## 常见注意点
 

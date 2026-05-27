@@ -1,29 +1,40 @@
 self.addEventListener("message", async (event) => {
   const { id, file, options, targetCount } = event.data ?? {};
   try {
-    const points = await createImagePointCloud(file, options ?? {}, targetCount);
+    const points = await createImagePointCloud(file, { ...(options ?? {}), jobId: id }, targetCount);
     self.postMessage({ id, points });
   } catch (error) {
     self.postMessage({ id, error: error?.message ?? String(error) });
   }
 });
 
+function postProgress(id, value, label) {
+  if (id === undefined || id === null) return;
+  self.postMessage({ id, progress: { value, label } });
+}
+
 async function createImagePointCloud(file, options, targetCount) {
   if (typeof createImageBitmap !== "function" || typeof OffscreenCanvas === "undefined") {
     throw new Error("当前浏览器不支持 Worker 图片采样");
   }
 
+  postProgress(options.jobId, 0.1, "正在解码图片");
   const bitmap = await createImageBitmap(file);
-  const maxSide = Math.min(960, Math.max(620, Math.round(Math.sqrt(targetCount) * 2.15)));
+  const requestedMaxSide = Number(options.maxSide);
+  const maxSideCap = Number.isFinite(requestedMaxSide) && requestedMaxSide > 0 ? requestedMaxSide : 1800;
+  const maxSide = Math.min(maxSideCap, Math.max(900, Math.round(Math.sqrt(targetCount) * 2.6)));
   const scale = Math.min(maxSide / bitmap.width, maxSide / bitmap.height, 1);
   const width = Math.max(1, Math.round(bitmap.width * scale));
   const height = Math.max(1, Math.round(bitmap.height * scale));
   const canvas = new OffscreenCanvas(width, height);
   const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
   context.clearRect(0, 0, width, height);
   context.drawImage(bitmap, 0, 0, width, height);
   bitmap.close?.();
 
+  postProgress(options.jobId, 0.22, "正在读取像素");
   const image = context.getImageData(0, 0, width, height);
   const totalPixels = width * height;
   const grayscale = new Float32Array(totalPixels);
@@ -34,8 +45,9 @@ async function createImagePointCloud(file, options, targetCount) {
   const contourStrength = clamp(options.contourStrength ?? 0.75, 0, 1);
   const interiorRatio = clamp(options.interiorRatio ?? 0.35, 0.2, 0.5);
   const colorMode = options.colorMode ?? "original";
-  const mono = hexToRgb(options.monoColor ?? "#ff4f8f");
+  const mono = hexToDisplayRgb(options.monoColor ?? "#ff4f8f");
   const globalAlpha = clamp(options.globalAlpha ?? 1, 0, 1);
+  const alphaThreshold = options.logoMode ? 0.1 : 0.035;
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
@@ -50,6 +62,7 @@ async function createImagePointCloud(file, options, targetCount) {
     }
   }
 
+  postProgress(options.jobId, 0.38, "正在分析轮廓和纹理");
   gaussianBlur3x3(grayscale, blurred, width, height);
 
   let threshold = 0;
@@ -69,7 +82,7 @@ async function createImagePointCloud(file, options, targetCount) {
   for (let y = 1; y < height - 1; y += 1) {
     for (let x = 1; x < width - 1; x += 1) {
       const pixelIndex = y * width + x;
-      if (alpha[pixelIndex] < 0.502) continue;
+      if (alpha[pixelIndex] < alphaThreshold) continue;
       if (options.logoMode && !isLogoForeground(blurred[pixelIndex], threshold, logoPolarity)) continue;
       foreground[pixelIndex] = 1;
       const gx =
@@ -103,7 +116,8 @@ async function createImagePointCloud(file, options, targetCount) {
   }
 
   strongGradients.sort((a, b) => a - b);
-  const strongEdgeThreshold = strongGradients[Math.floor(strongGradients.length * 0.8)] ?? 0;
+  postProgress(options.jobId, 0.58, "正在建立采样候选");
+  const strongEdgeThreshold = strongGradients[Math.floor(strongGradients.length * 0.76)] ?? 0;
   const maxGradient = strongGradients[strongGradients.length - 1] || 1;
 
   for (let y = 1; y < height - 1; y += 1) {
@@ -119,16 +133,24 @@ async function createImagePointCloud(file, options, targetCount) {
       const edge = gradient[pixelIndex] / maxGradient;
       const isStrongEdge = gradient[pixelIndex] >= strongEdgeThreshold;
       const morphologyEdge =
-        options.logoMode &&
         (foreground[pixelIndex - 1] === 0 ||
           foreground[pixelIndex + 1] === 0 ||
           foreground[pixelIndex - width] === 0 ||
           foreground[pixelIndex + width] === 0);
-      const detailWeight = Math.abs(lum - 0.5) * 0.16 + localContrast(blurred, width, pixelIndex) * 0.22;
-      const edgeWeight = isStrongEdge || morphologyEdge ? 1 : Math.max(edge ** 0.66, detailWeight);
-      const baseWeight = options.logoMode ? interiorRatio : 0.1 + edge * 0.18 + detailWeight;
+      const colorDetail = localColorContrast(image.data, width, pixelIndex);
+      const chroma = Math.max(r0, g0, b0) - Math.min(r0, g0, b0);
+      const alphaDetail = localContrast(alpha, width, pixelIndex);
+      const detailWeight =
+        Math.abs(lum - 0.5) * 0.08 +
+        localContrast(blurred, width, pixelIndex) * 0.22 +
+        colorDetail * 0.68 +
+        chroma * 0.18 +
+        alphaDetail * 0.46;
+      const isAlphaEdge = alphaDetail > 0.11;
+      const edgeWeight = isStrongEdge || morphologyEdge || isAlphaEdge ? 1 : Math.max(edge ** 0.66, detailWeight);
+      const baseWeight = options.logoMode ? Math.max(interiorRatio, 0.36) : 0.26 + edge * 0.1 + detailWeight * 1.05;
       const weight = Math.max(
-        isStrongEdge || morphologyEdge ? 1 : 0,
+        isStrongEdge || morphologyEdge || isAlphaEdge ? 1 : 0,
         baseWeight * (1 - contourStrength) + edgeWeight * contourStrength,
       );
       const color = mapImageColor(r0, g0, b0, lum, colorMode, mono);
@@ -141,7 +163,8 @@ async function createImagePointCloud(file, options, targetCount) {
         a: a0 * globalAlpha,
         luminance: lum,
         gradient: edge,
-        strong: isStrongEdge || morphologyEdge,
+        detail: detailWeight,
+        strong: isStrongEdge || morphologyEdge || isAlphaEdge,
         weight: Math.max(0.0001, weight),
       });
     }
@@ -155,18 +178,29 @@ async function createImagePointCloud(file, options, targetCount) {
   const centerY = (minY + maxY) / 2;
   const maxDim = Math.max(maxX - minX, maxY - minY, 1);
   const target = Math.max(1, targetCount);
-  const selected = weightedSampleCandidates(candidates, target, options.logoMode ? 0.52 : 0.68);
+  postProgress(options.jobId, 0.78, "正在分配高密度采样点");
+  const selected = weightedSampleCandidates(candidates, target, options.logoMode ? 0.7 : 0.36);
   return selected.map((point, i) => ({
-    x: ((point.x - centerX) / maxDim) * 2.82,
-    y: -((point.y - centerY) / maxDim) * 2.82,
-    z: (point.a - 0.5) * 0.055 + (point.luminance - 0.5) * 0.04 + (hash01(i * 4.11) - 0.5) * 0.016,
+    x:
+      ((point.x +
+        (hash01(i * 2.31) - 0.5) * (options.logoMode ? (point.strong ? 0.12 : 0.22) : point.strong ? 0.18 : 0.36) -
+        centerX) /
+        maxDim) *
+      2.82,
+    y:
+      -((point.y +
+        (hash01(i * 3.91) - 0.5) * (options.logoMode ? (point.strong ? 0.12 : 0.22) : point.strong ? 0.18 : 0.36) -
+        centerY) /
+        maxDim) *
+      2.82,
+    z: (point.a - 0.5) * 0.038 + (point.luminance - 0.5) * 0.026 + (hash01(i * 4.11) - 0.5) * 0.01,
     r: point.r,
     g: point.g,
     b: point.b,
     a: point.a,
     mix: clamp((point.g * 0.45 + point.b * 0.65) / (point.r + point.g + point.b + 0.001), 0, 1),
-    glow: 0.26 + point.a * 0.18 + point.luminance * 0.12 + point.gradient * 0.18,
-    jitter: point.strong ? 0.0009 : 0.0022,
+    glow: 0.44 + point.a * 0.2 + point.luminance * 0.13 + point.gradient * 0.16 + point.detail * 0.18,
+    jitter: point.strong ? 0.00028 : 0.00075,
     kind: point.strong ? 1 : 0,
   }));
 }
@@ -179,6 +213,26 @@ function localContrast(values, width, index) {
     Math.abs(center - values[index - width]),
     Math.abs(center - values[index + width]),
   );
+}
+
+function localColorContrast(data, width, pixelIndex) {
+  const index = pixelIndex * 4;
+  const left = (pixelIndex - 1) * 4;
+  const right = (pixelIndex + 1) * 4;
+  const up = (pixelIndex - width) * 4;
+  const down = (pixelIndex + width) * 4;
+  let contrast = 0;
+  for (let channel = 0; channel < 3; channel += 1) {
+    const center = data[index + channel] / 255;
+    contrast = Math.max(
+      contrast,
+      Math.abs(center - data[left + channel] / 255),
+      Math.abs(center - data[right + channel] / 255),
+      Math.abs(center - data[up + channel] / 255),
+      Math.abs(center - data[down + channel] / 255),
+    );
+  }
+  return contrast;
 }
 
 function gaussianBlur3x3(source, target, width, height) {
@@ -208,7 +262,7 @@ function otsuThreshold(values, alpha) {
   const histogram = new Uint32Array(256);
   let total = 0;
   for (let i = 0; i < values.length; i += 1) {
-    if (alpha[i] < 0.502) continue;
+    if (alpha[i] < 0.15) continue;
     histogram[Math.round(clamp(values[i], 0, 1) * 255)] += 1;
     total += 1;
   }
@@ -244,7 +298,7 @@ function chooseLogoPolarity(values, alpha, threshold) {
   let dark = 0;
   let light = 0;
   for (let i = 0; i < values.length; i += 1) {
-    if (alpha[i] < 0.502) continue;
+    if (alpha[i] < 0.15) continue;
     if (values[i] >= threshold) light += 1;
     else dark += 1;
   }
@@ -264,7 +318,8 @@ function isLogoForeground(value, threshold, polarity) {
 
 function mapImageColor(r, g, b, luminance, mode, monoColor) {
   if (mode === "luminance") {
-    return { r: luminance, g: luminance, b: luminance };
+    const value = luminance;
+    return { r: value, g: value, b: value };
   }
   if (mode === "monochrome") {
     return {
@@ -310,16 +365,19 @@ function appendMany(target, items) {
 }
 
 function weightedPickMany(candidates, count, seed) {
-  if (count <= 0) return [];
-  const cumulative = new Float32Array(candidates.length);
+  if (count <= 0 || candidates.length === 0) return [];
+  const cumulative = new Float64Array(candidates.length);
   let total = 0;
   for (let i = 0; i < candidates.length; i += 1) {
     total += candidates[i].weight;
     cumulative[i] = total;
   }
   const picked = [];
+  const stride = total / count;
+  const offset = hash01(seed * 0.37 + count * 0.017);
   for (let i = 0; i < count; i += 1) {
-    const value = hash01(i * seed + count * 0.013) * total;
+    const jitter = (hash01((i + 1) * seed + count * 0.013) - 0.5) * stride * 0.82;
+    const value = clamp((i + offset) * stride + jitter, 0, total - Number.EPSILON);
     picked.push(candidates[lowerBound(cumulative, value)] ?? candidates[candidates.length - 1]);
   }
   return picked;
@@ -336,7 +394,7 @@ function lowerBound(values, target) {
   return low;
 }
 
-function hexToRgb(hex) {
+function hexToDisplayRgb(hex) {
   const clean = String(hex ?? "#ffffff").replace("#", "").trim();
   const normalized =
     clean.length === 3

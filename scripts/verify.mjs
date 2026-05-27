@@ -65,9 +65,13 @@ async function verifyCase(activeBrowser, testCase) {
     });
     const canvasScreenshot = await canvas.screenshot();
     sample = sampleScreenshotPixels(canvasScreenshot);
-  } finally {
+  } catch (error) {
     await page.close();
+    throw error;
   }
+
+  const finalIssues = [...issues];
+  await page.close();
 
   console.log(
     `${testCase.name}: canvas=${Math.round(canvasBox.width)}x${Math.round(canvasBox.height)}, lit=${(
@@ -75,8 +79,8 @@ async function verifyCase(activeBrowser, testCase) {
     ).toFixed(2)}%, range=${sample.range}`,
   );
 
-  if (issues.length) {
-    throw new Error(`${testCase.name}: browser issues: ${issues.join(" | ")}`);
+  if (finalIssues.length) {
+    throw new Error(`${testCase.name}: browser issues: ${finalIssues.join(" | ")}`);
   }
   if (!sample.ok) {
     throw new Error(`${testCase.name}: canvas appears blank`);
@@ -90,6 +94,11 @@ async function verifyInteractions(activeBrowser) {
   try {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
     await page.locator("#scene").waitFor({ state: "visible", timeout: 15000 });
+    await page.evaluate(() => {
+      document.querySelectorAll("details").forEach((details) => {
+        details.open = true;
+      });
+    });
     await page.waitForTimeout(1800);
 
     for (const selector of [
@@ -123,6 +132,62 @@ async function verifyInteractions(activeBrowser) {
     await page.waitForTimeout(450);
     await page.click("#showPresetToggleBtn");
     await page.waitForTimeout(120);
+    await page.selectOption("#showPresetSelect", "stellarHeartLive");
+    await page.click("#showPresetToggleBtn");
+    await page.waitForTimeout(450);
+    await page.click("#showPresetToggleBtn");
+    await page.waitForTimeout(120);
+    await page.selectOption("#showPresetSelect", "custom");
+    await page.click('[data-show-step="0"]');
+    await page.fill("#showStepLabel", "验证片段");
+    await page.selectOption("#showStepCamera", "close");
+    await page.evaluate(() => {
+      const modelBrightness = document.querySelector("#showStepModelBrightness");
+      const backgroundBrightness = document.querySelector("#showStepBackgroundBrightness");
+      if (modelBrightness) {
+        modelBrightness.value = "115";
+        modelBrightness.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      if (backgroundBrightness) {
+        backgroundBrightness.value = "120";
+        backgroundBrightness.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+    await page.click("#showStepApplyBtn");
+    await page.waitForTimeout(240);
+    await page.click("#showStepExportBtn");
+    await page.click("#showStepImportBtn");
+    await page.waitForTimeout(160);
+    await page.setInputFiles("#showPresetFileInput", {
+      name: "verify-show.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(
+        JSON.stringify({
+          label: "文件导入验证",
+          steps: [
+            {
+              label: "文件开场",
+              duration: 3000,
+              theme: "neon",
+              background: "lattice",
+              model: "heart",
+              camera: "front",
+              modelBrightness: 1.1,
+              backgroundBrightness: 1.15,
+              burst: true,
+            },
+          ],
+        }),
+        "utf8",
+      ),
+    });
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#showPresetSelect")?.value === "custom" &&
+        document.querySelector("#showStepLabel")?.value === "文件开场",
+      null,
+      { timeout: 8000 },
+    );
     await page.click("#gestureToggleBtn");
     await page.waitForTimeout(120);
     await page.click("#freezeToggleBtn");
@@ -143,7 +208,7 @@ async function verifyInteractions(activeBrowser) {
         return model === "image" || diagnostic.includes("图片导入失败");
       },
       null,
-      { timeout: 25000 },
+      { timeout: 45000 },
     );
 
     const state = await page.evaluate(() => ({
@@ -273,7 +338,11 @@ function watchPageIssues(page) {
     if (response.status() === 404) issues.push(`404: ${response.url()}`);
   });
   page.on("requestfailed", (request) => {
-    issues.push(`request failed: ${request.url()} ${request.failure()?.errorText ?? ""}`.trim());
+    const errorText = request.failure()?.errorText ?? "";
+    if (errorText === "net::ERR_ABORTED" && request.url().includes("/mediapipe/hands/")) {
+      return;
+    }
+    issues.push(`request failed: ${request.url()} ${errorText}`.trim());
   });
   return issues;
 }

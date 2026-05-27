@@ -228,7 +228,11 @@ export function writePointCloudTargets(points, buffers) {
     buffers;
 
   for (let i = 0; i < count; i += 1) {
-    const point = safePoints[Math.floor(hash(i * 11.31) * safePoints.length)] ?? safePoints[0];
+    const pointIndex =
+      safePoints.length >= count
+        ? Math.min(safePoints.length - 1, Math.floor(((i + hash(i * 4.19)) / count) * safePoints.length))
+        : Math.floor(hash(i * 11.31) * safePoints.length);
+    const point = safePoints[pointIndex] ?? safePoints[0];
     const jitter = point.jitter ?? 0.006;
     const x = point.x + (hash(i * 3.71) - 0.5) * jitter;
     const y = point.y + (hash(i * 4.91) - 0.5) * jitter;

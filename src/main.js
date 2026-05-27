@@ -6,7 +6,13 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { createAudioReactor, stopAudioSource, updateAudioReactor, useAudioFile, useMicrophone } from "./audio.js";
-import { applyBackgroundTheme, createBackgroundSystem, setBackgroundMode, updateBackground } from "./backgrounds.js";
+import {
+  applyBackgroundTheme,
+  createBackgroundSystem,
+  setBackgroundBrightness,
+  setBackgroundMode,
+  updateBackground,
+} from "./backgrounds.js";
 import { MP_HANDS_ASSET_BASE, renderPixelRatio, selectQualityProfile } from "./config.js";
 import {
   average,
@@ -23,13 +29,15 @@ import {
   setCustomText,
   setImagePoints,
   setMeshPoints,
+  setParticleDrawCount,
   setParticleTargets,
   setTextFont,
   snapParticlesToTargets,
   updateParticles,
 } from "./particles.js";
-import { applyThemeToDocument, getTheme } from "./themes.js";
+import { THEMES, applyThemeToDocument, getTheme } from "./themes.js";
 import { createUI } from "./ui.js";
+import { SHOW_PRESET_LIBRARY } from "./show-presets/index.js";
 
 const ui = createUI();
 const {
@@ -43,6 +51,16 @@ const {
   themeSelect,
   showPresetSelect,
   showPresetToggleBtn,
+  showTimeline,
+  showStepApplyBtn,
+  showStepCaptureBtn,
+  showStepAddBtn,
+  showStepDuplicateBtn,
+  showStepDeleteBtn,
+  showStepExportBtn,
+  showStepImportBtn,
+  showStepFileImportBtn,
+  showPresetFileInput,
   gestureToggleBtn,
   freezeToggleBtn,
   colorPicker,
@@ -50,9 +68,15 @@ const {
   sensitivity,
   themeButtons,
   backgroundButtons,
+  backgroundSelect,
+  backgroundBrightness,
+  modelPlaceholderButtons,
+  modelBrightness,
   micToggleBtn,
   audioFileInput,
   imageFileInput,
+  imageBrightness,
+  imageSize,
   meshFileInput,
   audioStopBtn,
 } = ui.refs;
@@ -75,6 +99,8 @@ const renderer = new THREE.WebGLRenderer({
 renderer.setPixelRatio(pixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.84;
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x06080d, 0.055);
@@ -93,7 +119,7 @@ controls.target.set(0, 0, 0);
 controls.update();
 
 const renderPass = new RenderPass(scene, camera);
-const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.82, 0.55, 0.18);
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.58, 0.42, 0.33);
 const composer = new EffectComposer(renderer);
 composer.addPass(renderPass);
 composer.addPass(bloomPass);
@@ -115,6 +141,7 @@ scene.add(motionTrail.group);
 
 const backgroundSystem = createBackgroundSystem(initialTheme);
 scene.add(backgroundSystem.group);
+setBackgroundBrightness(backgroundSystem, ui.getBackgroundBrightness(), initialTheme);
 setBackgroundMode(backgroundSystem, ui.getBackgroundMode(), initialTheme);
 ui.setBackgroundActive(backgroundSystem.mode);
 
@@ -127,37 +154,200 @@ const SHOW_PRESETS = {
   auto: {
     label: "自动巡演",
     steps: [
-      { label: "霓虹爱心", theme: "neon", background: "nebula", model: "heart", duration: 9500 },
-      { label: "玫瑰舞台", theme: "rose", background: "stage", model: "flower", duration: 10500 },
-      { label: "电紫土星", theme: "violet", background: "minimal", model: "saturn", duration: 9500 },
-      { label: "夜空烟花", theme: "laser", background: "fireworks", model: "fireworks", duration: 11000 },
+      { label: "霓虹爱心", theme: "neon", background: "nebula", model: "heart", camera: "front", duration: 9500 },
+      {
+        label: "玫瑰舞台",
+        theme: "rose",
+        background: "stage",
+        model: "flower",
+        camera: "close",
+        modelBrightness: 1.08,
+        backgroundBrightness: 1.18,
+        duration: 10500,
+      },
+      {
+        label: "电紫土星",
+        theme: "violet",
+        background: "minimal",
+        model: "saturn",
+        camera: "left",
+        modelBrightness: 1.12,
+        backgroundBrightness: 0.9,
+        duration: 9500,
+      },
+      {
+        label: "夜空烟花",
+        theme: "laser",
+        background: "fireworks",
+        model: "fireworks",
+        camera: "wide",
+        burst: true,
+        duration: 11000,
+      },
     ],
   },
   romance: {
     label: "玫瑰告白",
     steps: [
-      { label: "玫红花朵", theme: "rose", background: "stage", model: "flower", duration: 11500 },
-      { label: "文字告白", theme: "gold", background: "nebula", model: "text", text: "LOVE", duration: 10500 },
-      { label: "暖光爱心", theme: "gold", background: "minimal", model: "heart", duration: 9500 },
+      {
+        label: "玫红花朵",
+        theme: "rose",
+        background: "stage",
+        model: "flower",
+        camera: "close",
+        modelBrightness: 1.06,
+        backgroundBrightness: 1.12,
+        duration: 11500,
+      },
+      {
+        label: "文字告白",
+        theme: "gold",
+        background: "nebula",
+        model: "text",
+        text: "LOVE",
+        camera: "front",
+        modelBrightness: 1.1,
+        duration: 10500,
+      },
+      {
+        label: "暖光爱心",
+        theme: "gold",
+        background: "minimal",
+        model: "heart",
+        camera: "low",
+        backgroundBrightness: 0.88,
+        duration: 9500,
+      },
     ],
   },
   club: {
     label: "夜场烟花",
     steps: [
-      { label: "激光爱心", theme: "laser", background: "stage", model: "heart", duration: 8500 },
-      { label: "电紫土星", theme: "violet", background: "nebula", model: "saturn", duration: 8500 },
-      { label: "爆场烟花", theme: "laser", background: "fireworks", model: "fireworks", duration: 12000 },
+      {
+        label: "激光爱心",
+        theme: "laser",
+        background: "stage",
+        model: "heart",
+        camera: "front",
+        backgroundBrightness: 1.22,
+        burst: true,
+        duration: 8500,
+      },
+      {
+        label: "电紫土星",
+        theme: "violet",
+        background: "nebula",
+        model: "saturn",
+        camera: "right",
+        modelBrightness: 1.18,
+        duration: 8500,
+      },
+      {
+        label: "爆场烟花",
+        theme: "laser",
+        background: "fireworks",
+        model: "fireworks",
+        camera: "wide",
+        backgroundBrightness: 1.3,
+        burst: true,
+        duration: 12000,
+      },
     ],
   },
   gallery: {
     label: "图形展台",
     steps: [
-      { label: "图片点云", theme: "ice", background: "minimal", model: "image", duration: 10500 },
-      { label: "3D 点云", theme: "blackGold", background: "stage", model: "mesh", duration: 10500 },
-      { label: "文字陈列", theme: "aurora", background: "nebula", model: "text", text: "PARTICLE", duration: 9500 },
-      { label: "土星陈列", theme: "gold", background: "minimal", model: "saturn", duration: 9000 },
+      {
+        label: "图片点云",
+        theme: "ice",
+        background: "minimal",
+        model: "image",
+        camera: "front",
+        imageBrightness: 3.0,
+        imageSize: 1,
+        duration: 10500,
+      },
+      {
+        label: "3D 点云",
+        theme: "blackGold",
+        background: "stage",
+        model: "mesh",
+        camera: "wide",
+        modelBrightness: 1.15,
+        duration: 10500,
+      },
+      {
+        label: "文字陈列",
+        theme: "aurora",
+        background: "nebula",
+        model: "text",
+        text: "PARTICLE",
+        camera: "front",
+        duration: 9500,
+      },
+      { label: "土星陈列", theme: "gold", background: "minimal", model: "saturn", camera: "top", duration: 9000 },
     ],
   },
+  ...Object.fromEntries(
+    SHOW_PRESET_LIBRARY.map((preset) => [
+      preset.id,
+      {
+        label: preset.label,
+        steps: preset.steps,
+      },
+    ]),
+  ),
+};
+
+ui.setShowPresetOptions(showPresetOptionList());
+
+const CUSTOM_SHOW_STORAGE_KEY = "customShowPreset";
+const SHOW_MODELS = new Set(["heart", "flower", "saturn", "fireworks", "text", "image", "mesh"]);
+const SHOW_BACKGROUNDS = new Set(["nebula", "stage", "minimal", "fireworks", "aurora", "lattice", "sunset"]);
+const SHOW_THEMES = new Set(THEMES.map((theme) => theme.id));
+const CAMERA_SHOTS = {
+  front: { position: [0, 1.0, 8.2], target: [0, 0, 0] },
+  close: { position: [0, 0.72, 5.35], target: [0, 0.08, 0] },
+  wide: { position: [0, 1.2, 10.7], target: [0, 0, 0] },
+  left: { position: [-5.25, 1.25, 6.45], target: [0, 0.05, 0] },
+  right: { position: [5.25, 1.25, 6.45], target: [0, 0.05, 0] },
+  top: { position: [0, 7.35, 4.55], target: [0, 0.05, 0] },
+  low: { position: [0, -0.95, 6.35], target: [0, 0.1, 0] },
+};
+const DEFAULT_CUSTOM_SHOW = {
+  label: "自定义编排",
+  steps: [
+    {
+      label: "开场爱心",
+      theme: "neon",
+      background: "nebula",
+      model: "heart",
+      camera: "front",
+      modelBrightness: 1.06,
+      backgroundBrightness: 1.08,
+      duration: 9000,
+    },
+    {
+      label: "近景花朵",
+      theme: "rose",
+      background: "stage",
+      model: "flower",
+      camera: "close",
+      modelBrightness: 1.08,
+      backgroundBrightness: 1.2,
+      duration: 10000,
+    },
+    {
+      label: "烟花收尾",
+      theme: "laser",
+      background: "fireworks",
+      model: "fireworks",
+      camera: "wide",
+      backgroundBrightness: 1.25,
+      burst: true,
+      duration: 11000,
+    },
+  ],
 };
 
 const state = {
@@ -166,6 +356,10 @@ const state = {
   color: new THREE.Color(initialTheme.primary),
   accent: new THREE.Color(initialTheme.accent),
   sensitivity: ui.getSensitivity(),
+  modelBrightness: ui.getModelBrightness(),
+  imageBrightness: ui.getImageBrightness(),
+  imageSize: ui.getImageSize(),
+  backgroundBrightness: ui.getBackgroundBrightness(),
   gesture: 0,
   gestureControlEnabled: true,
   frozen: false,
@@ -202,12 +396,18 @@ const state = {
   lastErrorMessage: "",
   processingVideo: false,
   modelTransition: null,
+  cameraTransition: null,
   customText: ui.getCustomText(),
   textFont: ui.getTextFontId(),
   showPreset: ui.getShowPresetId(),
+  customShowPreset: loadCustomShowPreset(),
   showPresetActive: false,
   showStepIndex: -1,
+  showEditorStepIndex: 0,
   nextShowStepAt: 0,
+  manualFreeze: false,
+  timelineFreeze: false,
+  timelineFreezeAt: 0,
   gestureCommand: { name: "none", pointing: false, pointX: 0, pointY: 0, pointZ: 0 },
   lastGestureCommand: "none",
   gestureCommandUntil: 0,
@@ -252,6 +452,10 @@ particles.textFont = state.textFont;
 setParticleTargets(particles, state.model);
 snapParticlesToTargets(particles);
 ui.setModelActive(state.model);
+syncParticleDrawRange();
+syncParticleBrightnessUniforms();
+renderShowComposer();
+installShowPresetApi();
 initCameraTracking();
 animate();
 
@@ -262,6 +466,12 @@ shapeSelect.addEventListener("change", () => {
 for (const button of modelButtons) {
   button.addEventListener("click", () => {
     selectModel(button.dataset.model);
+  });
+}
+
+for (const button of modelPlaceholderButtons) {
+  button.addEventListener("click", () => {
+    showHeldDiagnostic("更多模型入口已预留，后续可在这里接入新模型", 5000);
   });
 }
 
@@ -329,19 +539,34 @@ gestureToggleBtn?.addEventListener("click", () => {
 });
 
 freezeToggleBtn?.addEventListener("click", () => {
-  state.frozen = !state.frozen;
-  ui.setFreezeActive(state.frozen);
+  if (state.frozen) {
+    state.manualFreeze = false;
+    state.timelineFreeze = false;
+    state.timelineFreezeAt = 0;
+  } else {
+    state.manualFreeze = true;
+    state.timelineFreeze = false;
+    state.timelineFreezeAt = 0;
+  }
+  syncFrozenState();
   if (state.frozen) {
     ui.setStatus("画面已静止，可观察细节或截图", "idle");
+  } else {
+    ui.setStatus(state.gestureControlEnabled ? "画面继续运行，等待手势输入" : "画面继续运行，手势控制关闭", "ready");
   }
 });
 
 showPresetSelect?.addEventListener("change", () => {
   state.showPreset = ui.getShowPresetId();
   state.showStepIndex = -1;
+  state.showEditorStepIndex = 0;
   state.nextShowStepAt = 0;
+  state.timelineFreeze = false;
+  state.timelineFreezeAt = 0;
+  syncFrozenState();
+  renderShowComposer();
   if (state.showPresetActive) {
-    showHeldDiagnostic(`演出预设切换为 ${SHOW_PRESETS[state.showPreset]?.label ?? "自动巡演"}`, 5000);
+    showHeldDiagnostic(`演出预设切换为 ${getActiveShowPreset().label}`, 5000);
   }
 });
 
@@ -350,8 +575,116 @@ showPresetToggleBtn?.addEventListener("click", () => {
   state.showPreset = ui.getShowPresetId();
   state.showStepIndex = -1;
   state.nextShowStepAt = 0;
+  if (!state.showPresetActive) {
+    state.timelineFreeze = false;
+    state.timelineFreezeAt = 0;
+    syncFrozenState();
+  }
   ui.setShowPresetActive(state.showPresetActive);
   showHeldDiagnostic(state.showPresetActive ? "演出巡演已启动" : "演出巡演已停止", 5000);
+  renderShowComposer();
+});
+
+showTimeline?.addEventListener("click", (event) => {
+  const button = event.target.closest?.("[data-show-step]");
+  if (!button) return;
+  const index = Number(button.dataset.showStep);
+  const preset = getActiveShowPreset();
+  if (!Number.isInteger(index) || !preset.steps[index]) return;
+  state.showEditorStepIndex = index;
+  ui.setShowStepDraft(preset.steps[index]);
+  renderShowComposer();
+});
+
+showStepApplyBtn?.addEventListener("click", () => {
+  const preset = ensureEditingCustomPreset();
+  const index = clampShowStepIndex(state.showEditorStepIndex, preset);
+  const step = normalizeShowStep(ui.getShowStepDraft(), index);
+  preset.steps[index] = step;
+  persistCustomShowPreset();
+  applyShowStep(step, preset);
+  state.showStepIndex = index;
+  state.nextShowStepAt = performance.now() + step.duration;
+  showHeldDiagnostic(`已应用自定义片段：${step.label}`, 5000);
+  renderShowComposer();
+});
+
+showStepCaptureBtn?.addEventListener("click", () => {
+  const preset = ensureEditingCustomPreset();
+  const index = clampShowStepIndex(state.showEditorStepIndex, preset);
+  const step = normalizeShowStep(captureCurrentShowStep(), index);
+  preset.steps[index] = step;
+  ui.setShowStepDraft(step);
+  persistCustomShowPreset();
+  showHeldDiagnostic(`已捕获当前画面：${step.label}`, 5000);
+  renderShowComposer();
+});
+
+showStepAddBtn?.addEventListener("click", () => {
+  const preset = ensureEditingCustomPreset();
+  const index = clampShowStepIndex(state.showEditorStepIndex, preset);
+  const step = normalizeShowStep(ui.getShowStepDraft(), index + 1);
+  preset.steps.splice(index + 1, 0, { ...step, label: nextStepLabel(step.label, preset.steps.length + 1) });
+  state.showEditorStepIndex = index + 1;
+  persistCustomShowPreset();
+  renderShowComposer();
+  showHeldDiagnostic("已新增自定义演出片段", 4200);
+});
+
+showStepDuplicateBtn?.addEventListener("click", () => {
+  const preset = ensureEditingCustomPreset();
+  const index = clampShowStepIndex(state.showEditorStepIndex, preset);
+  const source = preset.steps[index] ?? normalizeShowStep(ui.getShowStepDraft(), index);
+  preset.steps.splice(index + 1, 0, { ...source, label: nextStepLabel(source.label, preset.steps.length + 1) });
+  state.showEditorStepIndex = index + 1;
+  persistCustomShowPreset();
+  renderShowComposer();
+  showHeldDiagnostic("已复制当前演出片段", 4200);
+});
+
+showStepDeleteBtn?.addEventListener("click", () => {
+  const preset = ensureEditingCustomPreset();
+  if (preset.steps.length <= 1) {
+    showHeldDiagnostic("至少保留一个演出片段", 4200);
+    return;
+  }
+  const index = clampShowStepIndex(state.showEditorStepIndex, preset);
+  preset.steps.splice(index, 1);
+  state.showEditorStepIndex = Math.min(index, preset.steps.length - 1);
+  persistCustomShowPreset();
+  renderShowComposer();
+  showHeldDiagnostic("已删除自定义演出片段", 4200);
+});
+
+showStepExportBtn?.addEventListener("click", () => {
+  ui.setShowJson(JSON.stringify(getActiveShowPreset(), null, 2));
+  showHeldDiagnostic("已导出当前演出 JSON，可复制保存或继续修改后导入", 6000);
+});
+
+showStepImportBtn?.addEventListener("click", () => {
+  try {
+    importCustomShowPreset(JSON.parse(ui.getShowJson()), "自定义演出 JSON 已导入");
+  } catch (error) {
+    showHeldDiagnostic(`导入失败：${error?.message ?? "JSON 格式不正确"}`, 8000);
+  }
+});
+
+showStepFileImportBtn?.addEventListener("click", () => {
+  showPresetFileInput?.click();
+});
+
+showPresetFileInput?.addEventListener("change", async () => {
+  const [file] = showPresetFileInput.files ?? [];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    importCustomShowPreset(parsed, `已从文件导入演出：${file.name}`);
+  } catch (error) {
+    showHeldDiagnostic(`文件导入失败：${error?.message ?? "JSON 格式不正确"}`, 8000);
+  } finally {
+    showPresetFileInput.value = "";
+  }
 });
 
 for (const button of backgroundButtons) {
@@ -361,6 +694,32 @@ for (const button of backgroundButtons) {
     ui.saveBackgroundMode(backgroundSystem.mode);
   });
 }
+
+backgroundSelect?.addEventListener("change", () => {
+  setBackgroundMode(backgroundSystem, backgroundSelect.value, state.theme);
+  ui.setBackgroundActive(backgroundSystem.mode);
+  ui.saveBackgroundMode(backgroundSystem.mode);
+});
+
+backgroundBrightness?.addEventListener("input", () => {
+  state.backgroundBrightness = ui.getBackgroundBrightness();
+  setBackgroundBrightness(backgroundSystem, state.backgroundBrightness, state.theme);
+});
+
+modelBrightness?.addEventListener("input", () => {
+  state.modelBrightness = ui.getModelBrightness();
+  syncParticleBrightnessUniforms();
+});
+
+imageBrightness?.addEventListener("input", () => {
+  state.imageBrightness = ui.getImageBrightness();
+  syncParticleBrightnessUniforms();
+});
+
+imageSize?.addEventListener("input", () => {
+  state.imageSize = ui.getImageSize();
+  syncParticleDrawRange();
+});
 
 micToggleBtn.addEventListener("click", async () => {
   try {
@@ -388,14 +747,32 @@ imageFileInput?.addEventListener("change", async () => {
   const [file] = imageFileInput.files ?? [];
   if (!file) return;
   try {
+    ui.setImportProgress({ active: true, value: 0.06, label: "准备读取图片" });
     showHeldDiagnostic(`正在分析 ${file.name}，大图或高粒子档可能需要几秒`, 60000);
-    const points = await createImagePointCloud(file, ui.getImageOptions(), Math.round(particles.count * 1.22));
+    const imageSampleTarget = Math.min(
+      qualityProfile.maxImageSamples ?? 1200000,
+      Math.round(particles.count * (qualityProfile.imageSampleMultiplier ?? 3)),
+    );
+    const points = await createImagePointCloud(
+      file,
+      { ...ui.getImageOptions(), maxSide: qualityProfile.imageMaxSide },
+      imageSampleTarget,
+      (progress) => {
+        ui.setImportProgress({ active: true, ...progress });
+      },
+    );
+    ui.setImportProgress({ active: true, value: 0.94, label: "正在生成图片粒子" });
     setImagePoints(particles, points);
     selectModel("image", true);
+    syncParticleDrawRange();
+    syncParticleBrightnessUniforms();
+    ui.setImportProgress({ active: true, value: 1, label: "图片导入完成" });
     showHeldDiagnostic(`图片/Logo 已生成 ${points.length} 个采样点，可用手势和音乐驱动`, 8000);
+    window.setTimeout(() => ui.setImportProgress({ active: false }), 900);
   } catch (error) {
     console.error(error);
-    showHeldDiagnostic(`图片导入失败：${error?.message ?? "unknown error"}`, 12000);
+    ui.setImportProgress({ active: true, value: 1, label: "加载失败，请重新导入", error: true });
+    showHeldDiagnostic(`加载失败，请重新导入：${error?.message ?? "unknown error"}`, 12000);
   } finally {
     imageFileInput.value = "";
   }
@@ -405,14 +782,25 @@ meshFileInput?.addEventListener("change", async () => {
   const [file] = meshFileInput.files ?? [];
   if (!file) return;
   try {
+    ui.setImportProgress({ active: true, value: 0.06, label: "准备读取 GLB" });
     showHeldDiagnostic("正在读取 GLB 并采样模型表面", 60000);
-    const points = await createMeshPointCloud(file, Math.round(particles.count * 0.65));
+    const meshSampleTarget = Math.min(
+      qualityProfile.maxMeshSamples ?? 360000,
+      Math.round(particles.count * (qualityProfile.meshSampleMultiplier ?? 1)),
+    );
+    const points = await createMeshPointCloud(file, meshSampleTarget, (progress) => {
+      ui.setImportProgress({ active: true, ...progress });
+    });
+    ui.setImportProgress({ active: true, value: 0.94, label: "正在生成 3D 粒子" });
     setMeshPoints(particles, points);
     selectModel("mesh", true);
+    ui.setImportProgress({ active: true, value: 1, label: "GLB 导入完成" });
     showHeldDiagnostic(`GLB 模型已生成 ${points.length} 个 3D 表面采样点`, 8000);
+    window.setTimeout(() => ui.setImportProgress({ active: false }), 900);
   } catch (error) {
     console.error(error);
-    showHeldDiagnostic(`GLB 导入失败：${error?.message ?? "unknown error"}`, 12000);
+    ui.setImportProgress({ active: true, value: 1, label: "加载失败，请重新导入", error: true });
+    showHeldDiagnostic(`加载失败，请重新导入：${error?.message ?? "unknown error"}`, 12000);
   } finally {
     meshFileInput.value = "";
   }
@@ -535,7 +923,7 @@ async function initCameraTracking() {
     processVideoFrame();
     ui.setStatus("摄像头已开启，等待双手入镜", "ready");
   } catch (error) {
-    console.error(error);
+    console.warn(error);
     state.lastErrorMessage = error?.message ?? "unknown error";
     ui.setStatus("摄像头或手势模型不可用，可用鼠标预览粒子", "error");
     ui.setDiagnostic(`错误：${state.lastErrorMessage}`);
@@ -566,8 +954,12 @@ function animate() {
   const elapsed = clock.elapsedTime;
   const now = performance.now();
   updatePerformanceStats(now);
+  if (state.showPresetActive && (!state.manualFreeze || state.timelineFreeze)) {
+    updateShowPreset(now);
+  }
+  activateTimelineFreezeIfReady(now);
   if (state.frozen) {
-    controls.update();
+    updateCameraRig(delta, now);
     composer.render();
     return;
   }
@@ -578,7 +970,6 @@ function animate() {
   ui.updateAudioLevel(audio);
   particles.material.uniforms.uTime.value = elapsed;
   detectHands(now);
-  updateShowPreset(now);
   updateFireworkExplosion(now);
   updateParticles(particles, state, {
     delta,
@@ -589,8 +980,7 @@ function animate() {
     onGestureUpdate: ui.updateGestureMeter,
   });
 
-  controls.update();
-  applyFistCameraControl(delta);
+  updateCameraRig(delta, now);
   state.lightPulse = updateStaticLights(staticLights, elapsed);
   updateBackground(backgroundSystem, elapsed, state.audioMotion, state.model);
   updateParticleRig(delta, elapsed, state.audioMotion);
@@ -717,6 +1107,11 @@ async function processVideoFrame() {
 }
 
 function updateFistViewControl(hand, handCount) {
+  if (state.cameraTransition) {
+    state.fistViewActive = false;
+    return;
+  }
+
   const active = handCount === 1 && state.gestureTarget < 0.24;
 
   if (!active) {
@@ -858,35 +1253,49 @@ function showHeldDiagnostic(text, duration = 8000) {
 
 function updateShowPreset(now) {
   if (!state.showPresetActive) return;
-  const preset = SHOW_PRESETS[state.showPreset] ?? SHOW_PRESETS.auto;
+  const preset = getActiveShowPreset();
+  const steps = preset.steps;
+  if (!steps.length) return;
   if (now < state.nextShowStepAt) return;
 
-  const steps = preset.steps;
   state.showStepIndex = (state.showStepIndex + 1) % steps.length;
-  const step = steps[state.showStepIndex];
+  const step = normalizeShowStep(steps[state.showStepIndex], state.showStepIndex);
   applyShowStep(step, preset);
-  state.nextShowStepAt = now + (step.duration ?? 10000);
+  state.nextShowStepAt = now + step.duration;
+  renderShowComposer({ syncDraft: false });
 }
 
 function applyShowStep(step, preset) {
-  if (step.theme) {
-    applyTheme(getTheme(step.theme), { save: false });
+  const normalized = normalizeShowStep(step, state.showStepIndex);
+  if (normalized.theme) {
+    applyTheme(getTheme(normalized.theme), { save: false });
   }
-  if (step.background) {
-    setBackgroundMode(backgroundSystem, step.background, state.theme);
+  if (normalized.background) {
+    setBackgroundMode(backgroundSystem, normalized.background, state.theme);
     ui.setBackgroundActive(backgroundSystem.mode);
   }
-  if (step.text && textInput) {
-    textInput.value = step.text;
+  setModelBrightnessRatio(normalized.modelBrightness);
+  setBackgroundBrightnessRatio(normalized.backgroundBrightness);
+  setImageBrightnessRatio(normalized.imageBrightness);
+  setImageSizeRatio(normalized.imageSize);
+
+  if (normalized.text && textInput) {
+    textInput.value = normalized.text;
   }
 
-  const model = resolveShowModel(step.model);
+  const model = resolveShowModel(normalized.model);
   selectModel(model, model === "text");
-  if (model === "fireworks") {
+  if (normalized.camera && normalized.camera !== "hold") {
+    startCameraTransition(normalized.camera, normalized.cameraDuration);
+  }
+  if (normalized.burst) {
+    triggerShowBurst();
+  } else if (model === "fireworks") {
     triggerFireworksBurst();
   }
 
-  showHeldDiagnostic(`演出：${preset.label} / ${step.label}`, 3600);
+  scheduleTimelineFreeze(normalized);
+  showHeldDiagnostic(`演出：${preset.label} / ${normalized.label}`, 3600);
 }
 
 function resolveShowModel(model) {
@@ -897,6 +1306,361 @@ function resolveShowModel(model) {
     return "saturn";
   }
   return model;
+}
+
+function getActiveShowPreset() {
+  if (state.showPreset === "custom") {
+    return state.customShowPreset;
+  }
+  return SHOW_PRESETS[state.showPreset] ?? SHOW_PRESETS.auto;
+}
+
+function showPresetOptionList() {
+  return [
+    ...Object.entries(SHOW_PRESETS).map(([id, preset]) => ({ id, label: preset.label })),
+    { id: "custom", label: "自定义编排" },
+  ];
+}
+
+function ensureEditingCustomPreset() {
+  if (state.showPreset !== "custom") {
+    state.customShowPreset = normalizeShowPreset(cloneShowPreset(getActiveShowPreset()), "自定义编排");
+    state.customShowPreset.label = "自定义编排";
+    state.showPreset = "custom";
+    state.showStepIndex = -1;
+    state.nextShowStepAt = 0;
+    ui.setShowPresetId("custom");
+  }
+  return state.customShowPreset;
+}
+
+function importCustomShowPreset(input, message = "自定义演出已导入") {
+  state.customShowPreset = normalizeShowPreset(input, "自定义编排");
+  state.showPreset = "custom";
+  state.showStepIndex = -1;
+  state.showEditorStepIndex = 0;
+  state.nextShowStepAt = 0;
+  state.timelineFreeze = false;
+  state.timelineFreezeAt = 0;
+  syncFrozenState();
+  ui.setShowPresetId("custom");
+  persistCustomShowPreset();
+  renderShowComposer();
+  ui.setShowJson(JSON.stringify(state.customShowPreset, null, 2));
+  showHeldDiagnostic(message, 6000);
+}
+
+function installShowPresetApi() {
+  if (typeof window === "undefined") return;
+  window.handParticleShows = {
+    list: () => showPresetOptionList().map((preset) => ({ ...preset })),
+    current: () => cloneShowPreset(getActiveShowPreset()),
+    importPreset: (preset) => {
+      importCustomShowPreset(preset, "外部接口已导入自定义演出");
+      return cloneShowPreset(state.customShowPreset);
+    },
+    play: (presetId = "custom") => {
+      ui.setShowPresetId(presetId);
+      state.showPreset = ui.getShowPresetId();
+      state.showPresetActive = true;
+      state.showStepIndex = -1;
+      state.nextShowStepAt = 0;
+      ui.setShowPresetActive(true);
+      renderShowComposer();
+      return cloneShowPreset(getActiveShowPreset());
+    },
+    stop: () => {
+      state.showPresetActive = false;
+      state.timelineFreeze = false;
+      state.timelineFreezeAt = 0;
+      syncFrozenState();
+      ui.setShowPresetActive(false);
+    },
+  };
+}
+
+function renderShowComposer(options = {}) {
+  const { syncDraft = true } = options;
+  const preset = getActiveShowPreset();
+  state.showEditorStepIndex = clampShowStepIndex(state.showEditorStepIndex, preset);
+  ui.renderShowTimeline(preset, state.showStepIndex, state.showEditorStepIndex);
+  if (syncDraft) {
+    ui.setShowStepDraft(preset.steps[state.showEditorStepIndex] ?? DEFAULT_CUSTOM_SHOW.steps[0]);
+  }
+}
+
+function clampShowStepIndex(index, preset = getActiveShowPreset()) {
+  const max = Math.max(0, (preset.steps?.length ?? 1) - 1);
+  return THREE.MathUtils.clamp(Number.isInteger(index) ? index : 0, 0, max);
+}
+
+function captureCurrentShowStep() {
+  return {
+    label: `捕获${modelLabel(state.model)}`,
+    duration: 10000,
+    theme: state.theme?.id ?? "neon",
+    background: backgroundSystem.mode,
+    model: state.model,
+    text: state.customText,
+    camera: nearestCameraShot(),
+    modelBrightness: state.modelBrightness,
+    backgroundBrightness: state.backgroundBrightness,
+    imageBrightness: state.imageBrightness,
+    imageSize: state.imageSize,
+    burst: state.model === "fireworks",
+    freeze: state.frozen,
+  };
+}
+
+function normalizeShowPreset(input, fallbackLabel = "自定义编排") {
+  const source = Array.isArray(input) ? { label: fallbackLabel, steps: input } : input;
+  const rawSteps = Array.isArray(source?.steps)
+    ? source.steps
+    : source && typeof source === "object" && source.model
+      ? [source]
+      : DEFAULT_CUSTOM_SHOW.steps;
+  const steps = rawSteps.slice(0, 80).map((step, index) => normalizeShowStep(step, index));
+  return {
+    label: normalizeShowPresetLabel(source?.label ?? fallbackLabel),
+    steps: steps.length > 0 ? steps : DEFAULT_CUSTOM_SHOW.steps.map((step, index) => normalizeShowStep(step, index)),
+  };
+}
+
+function normalizeShowStep(step = {}, index = 0) {
+  const duration = normalizeShowDuration(step.duration ?? step.seconds);
+  return {
+    label: normalizeShowLabel(step.label, index),
+    duration,
+    theme: SHOW_THEMES.has(step.theme) ? step.theme : "neon",
+    background: SHOW_BACKGROUNDS.has(step.background) ? step.background : "nebula",
+    model: SHOW_MODELS.has(step.model) ? step.model : "heart",
+    text: normalizeShowText(step.text ?? "LOVE"),
+    camera: normalizeCameraSpec(step.camera),
+    cameraDuration: normalizeShowDuration(step.cameraDuration ?? 1400, 300, 6000),
+    modelBrightness: normalizeShowRatio(step.modelBrightness, 1, 0.45, 2.2),
+    backgroundBrightness: normalizeShowRatio(step.backgroundBrightness, 1, 0.35, 2.2),
+    imageBrightness: normalizeShowRatio(step.imageBrightness, 2.8, 0.6, 4.8),
+    imageSize: normalizeShowRatio(step.imageSize, 1, 0.45, 1),
+    burst: normalizeShowBoolean(step.burst),
+    freeze: normalizeShowBoolean(step.freeze),
+  };
+}
+
+function normalizeShowDuration(value, min = 2000, max = 120000) {
+  const numeric = Number(value);
+  const milliseconds = numeric > 0 && numeric <= 120 ? numeric * 1000 : numeric;
+  return Math.round(THREE.MathUtils.clamp(Number.isFinite(milliseconds) ? milliseconds : 10000, min, max));
+}
+
+function normalizeShowRatio(value, fallback, min, max) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const numeric = Number(String(value).replace("%", ""));
+  const ratio = numeric > 10 ? numeric / 100 : numeric;
+  return THREE.MathUtils.clamp(Number.isFinite(ratio) ? ratio : fallback, min, max);
+}
+
+function normalizeShowBoolean(value) {
+  if (typeof value === "string") {
+    return value === "1" || value.toLowerCase() === "true" || value === "是";
+  }
+  return Boolean(value);
+}
+
+function normalizeShowPresetLabel(label) {
+  const trimmed = String(label ?? "").trim();
+  return trimmed.length > 0 ? trimmed.slice(0, 24) : "自定义编排";
+}
+
+function normalizeShowLabel(label, index) {
+  const trimmed = String(label ?? "").trim();
+  return trimmed.length > 0 ? trimmed.slice(0, 18) : `片段 ${index + 1}`;
+}
+
+function normalizeShowText(text) {
+  const trimmed = String(text ?? "").trim();
+  return trimmed.length > 0 ? trimmed.slice(0, 18) : "LOVE";
+}
+
+function normalizeCameraSpec(cameraSpec) {
+  if (!cameraSpec || cameraSpec === "hold") return "hold";
+  if (typeof cameraSpec === "string") {
+    return CAMERA_SHOTS[cameraSpec] ? cameraSpec : "hold";
+  }
+  const position = vectorArray(cameraSpec.position);
+  const target = vectorArray(cameraSpec.target);
+  if (!position || !target) return "hold";
+  return { position, target };
+}
+
+function vectorArray(value) {
+  if (!Array.isArray(value) || value.length < 3) return null;
+  const vector = value.slice(0, 3).map(Number);
+  return vector.every(Number.isFinite) ? vector : null;
+}
+
+function cloneShowPreset(preset) {
+  return JSON.parse(JSON.stringify(preset));
+}
+
+function loadCustomShowPreset() {
+  try {
+    const raw = localStorage.getItem(CUSTOM_SHOW_STORAGE_KEY);
+    return raw ? normalizeShowPreset(JSON.parse(raw), "自定义编排") : normalizeShowPreset(DEFAULT_CUSTOM_SHOW);
+  } catch {
+    return normalizeShowPreset(DEFAULT_CUSTOM_SHOW);
+  }
+}
+
+function persistCustomShowPreset() {
+  state.customShowPreset = normalizeShowPreset(state.customShowPreset, "自定义编排");
+  try {
+    localStorage.setItem(CUSTOM_SHOW_STORAGE_KEY, JSON.stringify(state.customShowPreset));
+  } catch {
+    // Local storage can be unavailable in strict privacy modes.
+  }
+}
+
+function nextStepLabel(label, count) {
+  const base = String(label ?? "片段").replace(/\s+\d+$/, "").slice(0, 14).trim() || "片段";
+  return `${base} ${count}`;
+}
+
+function setModelBrightnessRatio(value) {
+  setRangeRatio(modelBrightness, value);
+  state.modelBrightness = ui.getModelBrightness();
+  syncParticleBrightnessUniforms();
+}
+
+function setBackgroundBrightnessRatio(value) {
+  setRangeRatio(backgroundBrightness, value);
+  state.backgroundBrightness = ui.getBackgroundBrightness();
+  setBackgroundBrightness(backgroundSystem, state.backgroundBrightness, state.theme);
+}
+
+function setImageBrightnessRatio(value) {
+  setRangeRatio(imageBrightness, value);
+  state.imageBrightness = ui.getImageBrightness();
+  syncParticleBrightnessUniforms();
+}
+
+function setImageSizeRatio(value) {
+  setRangeRatio(imageSize, value);
+  state.imageSize = ui.getImageSize();
+  syncParticleDrawRange();
+}
+
+function setRangeRatio(input, ratio) {
+  if (!input) return;
+  const min = Number(input.min);
+  const max = Number(input.max);
+  const step = Number(input.step) || 1;
+  const raw = THREE.MathUtils.clamp(Number(ratio) * 100, min, max);
+  const aligned = Math.round(raw / step) * step;
+  input.value = String(THREE.MathUtils.clamp(aligned, min, max));
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function scheduleTimelineFreeze(step) {
+  state.timelineFreeze = false;
+  state.timelineFreezeAt = step.freeze ? performance.now() + Math.min(1400, step.duration * 0.42) : 0;
+  syncFrozenState();
+}
+
+function activateTimelineFreezeIfReady(now) {
+  if (state.timelineFreezeAt <= 0 || now < state.timelineFreezeAt) return;
+  state.timelineFreezeAt = 0;
+  state.timelineFreeze = true;
+  syncFrozenState();
+}
+
+function syncFrozenState() {
+  state.frozen = state.manualFreeze || state.timelineFreeze;
+  ui.setFreezeActive(state.frozen);
+}
+
+function updateCameraRig(delta, now) {
+  if (state.cameraTransition) {
+    updateCameraTransition(now);
+    return;
+  }
+  controls.update();
+  applyFistCameraControl(delta);
+}
+
+function startCameraTransition(cameraSpec, duration = 1400) {
+  const shot = resolveCameraShot(cameraSpec);
+  if (!shot) return;
+  state.fistViewActive = false;
+  controls.enabled = false;
+  state.cameraTransition = {
+    startedAt: performance.now(),
+    duration: THREE.MathUtils.clamp(Number(duration) || 1400, 300, 6000),
+    fromPosition: camera.position.clone(),
+    fromTarget: controls.target.clone(),
+    toPosition: shot.position,
+    toTarget: shot.target,
+  };
+}
+
+function updateCameraTransition(now) {
+  const transition = state.cameraTransition;
+  if (!transition) return;
+  const progress = THREE.MathUtils.clamp((now - transition.startedAt) / transition.duration, 0, 1);
+  const eased = progress * progress * (3 - 2 * progress);
+  camera.position.lerpVectors(transition.fromPosition, transition.toPosition, eased);
+  controls.target.lerpVectors(transition.fromTarget, transition.toTarget, eased);
+  camera.lookAt(controls.target);
+  if (progress >= 1) {
+    state.cameraTransition = null;
+    controls.enabled = true;
+    controls.update();
+  }
+}
+
+function resolveCameraShot(cameraSpec) {
+  if (!cameraSpec || cameraSpec === "hold") return null;
+  const shot = typeof cameraSpec === "string" ? CAMERA_SHOTS[cameraSpec] : cameraSpec;
+  const position = vectorArray(shot?.position);
+  const target = vectorArray(shot?.target);
+  if (!position || !target) return null;
+  return {
+    position: new THREE.Vector3(...position),
+    target: new THREE.Vector3(...target),
+  };
+}
+
+function nearestCameraShot() {
+  let bestId = "front";
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const [id, shot] of Object.entries(CAMERA_SHOTS)) {
+    const position = new THREE.Vector3(...shot.position);
+    const target = new THREE.Vector3(...shot.target);
+    const distance = camera.position.distanceToSquared(position) + controls.target.distanceToSquared(target) * 2;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestId = id;
+    }
+  }
+  return bestId;
+}
+
+function triggerShowBurst() {
+  triggerFireworksBurst();
+  state.pointerBoost = Math.max(state.pointerBoost, 0.92);
+  state.pointerActiveUntil = performance.now() + 900;
+  state.recoverUntil = performance.now() + 1600;
+  state.gesture = Math.max(state.gesture, 0.24);
+  state.gestureTarget = Math.max(state.gestureTarget, 0.42);
+}
+
+function modelLabel(model) {
+  if (model === "flower") return "花朵";
+  if (model === "saturn") return "土星";
+  if (model === "fireworks") return "烟花";
+  if (model === "text") return "文字";
+  if (model === "image") return "图片";
+  if (model === "mesh") return "3D";
+  return "爱心";
 }
 
 function syncParticlePalette() {
@@ -967,6 +1731,29 @@ function selectModel(model, forceRefresh = false) {
   }
 
   syncParticlePalette();
+  syncParticleDrawRange();
+  syncParticleBrightnessUniforms();
+}
+
+function syncParticleBrightnessUniforms() {
+  particles.material.uniforms.uModelBrightness.value = THREE.MathUtils.clamp(state.modelBrightness ?? 1, 0.35, 2.4);
+  particles.material.uniforms.uImageBrightness.value =
+    state.model === "image" ? THREE.MathUtils.clamp(state.imageBrightness ?? 2.8, 0.45, 5.2) : 1;
+}
+
+function syncParticleDrawRange() {
+  const visibleCount = currentVisibleParticleCount();
+  setParticleDrawCount(particles, visibleCount);
+  ui.updateImageSizeLabel(state.model === "image" ? visibleCount : null);
+}
+
+function currentVisibleParticleCount() {
+  if (state.model !== "image") {
+    return particles.count;
+  }
+  const size = THREE.MathUtils.clamp(state.imageSize ?? 1, 0.45, 1);
+  const density = THREE.MathUtils.clamp(size ** 1.42, 0.32, 1);
+  return Math.max(12000, Math.round(particles.count * density));
 }
 
 function triggerFireworksBurst() {
@@ -1134,7 +1921,7 @@ function createMotionTrail(theme) {
         vSeed = aSeed;
         vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
         float taper = pow(1.0 - clamp(aAge, 0.0, 1.0), 1.02);
-        float sparkle = 0.9 + aSeed * 0.68;
+        float sparkle = 0.78 + aSeed * 0.48;
         gl_PointSize = uSize * taper * sparkle * uPixelRatio / max(0.55, -mvPosition.z);
         gl_Position = projectionMatrix * mvPosition;
       }
@@ -1150,7 +1937,8 @@ function createMotionTrail(theme) {
         float d = length(uv);
         float alpha = smoothstep(0.5, 0.0, d) * pow(1.0 - vAge, 1.08);
         float core = smoothstep(0.18, 0.0, d);
-        vec3 color = uColor * (0.74 + vSeed * 0.36) + core * 0.58;
+        vec3 color = uColor * (0.58 + vSeed * 0.24) + core * 0.22;
+        color = color / (vec3(1.0) + max(color - vec3(0.68), vec3(0.0)) * 0.42);
         gl_FragColor = vec4(color, alpha * uOpacity);
       }
     `,
@@ -1233,8 +2021,8 @@ function updateMotionTrail(elapsed, audio) {
   motionTrail.material.color.lerp(trailColor, 0.18);
   motionTrail.tubeMaterial.color.lerp(tubeColor, 0.16);
   motionTrail.sparkMaterial.uniforms.uColor.value.lerp(trailColor, 0.18);
-  const targetOpacity = active && points.length > 2 ? 0.24 + beatPulse * 0.26 + shimmer * 0.035 : 0;
-  const targetTubeOpacity = active && points.length > 2 ? 0.075 + beatPulse * 0.11 + onsetPulse * 0.045 + shimmer * 0.025 : 0;
+  const targetOpacity = active && points.length > 2 ? 0.13 + beatPulse * 0.13 + shimmer * 0.018 : 0;
+  const targetTubeOpacity = active && points.length > 2 ? 0.04 + beatPulse * 0.055 + onsetPulse * 0.025 + shimmer * 0.012 : 0;
   motionTrail.material.opacity = THREE.MathUtils.lerp(motionTrail.material.opacity, targetOpacity, active ? 0.18 : 0.08);
   motionTrail.tubeMaterial.opacity = THREE.MathUtils.lerp(
     motionTrail.tubeMaterial.opacity,
@@ -1243,10 +2031,10 @@ function updateMotionTrail(elapsed, audio) {
   );
   motionTrail.sparkMaterial.uniforms.uOpacity.value = THREE.MathUtils.lerp(
     motionTrail.sparkMaterial.uniforms.uOpacity.value,
-    active && points.length > 2 ? 0.42 + onsetPulse * 0.48 + shimmer * 0.08 : 0,
+    active && points.length > 2 ? 0.2 + onsetPulse * 0.22 + shimmer * 0.04 : 0,
     active ? 0.22 : 0.08,
   );
-  motionTrail.sparkMaterial.uniforms.uSize.value = 96 + beatPulse * 38 + shimmer * 8;
+  motionTrail.sparkMaterial.uniforms.uSize.value = 68 + beatPulse * 24 + shimmer * 5;
 }
 
 function updatePerformanceStats(now) {
@@ -1257,7 +2045,7 @@ function updatePerformanceStats(now) {
   if (performanceStats.frames < 6) {
     ui.updatePerformance({
       fpsLabel: "测量中",
-      particleCount: particles.count,
+      particleCount: particles.visibleCount ?? particles.count,
     });
     performanceStats.frames = 0;
     performanceStats.lastUpdate = now;
@@ -1269,7 +2057,7 @@ function updatePerformanceStats(now) {
   performanceStats.lastUpdate = now;
   ui.updatePerformance({
     fps,
-    particleCount: particles.count,
+    particleCount: particles.visibleCount ?? particles.count,
   });
 }
 
@@ -1288,30 +2076,30 @@ function shouldUseFboSimulation(activeRenderer, profile) {
   return hasWebGl2 && hasVertexTextures && hasFloatTargets && !isMobileProfile;
 }
 
-async function createImagePointCloud(file, options, targetCount) {
+async function createImagePointCloud(file, options, targetCount, onProgress) {
   if (supportsImageWorker()) {
     try {
-      return await createImagePointCloudInWorker(file, options, targetCount);
+      return await createImagePointCloudInWorker(file, options, targetCount, onProgress);
     } catch (error) {
       console.warn(`图片 Worker 采样失败，回退到主线程：${error?.message ?? error}`);
     }
   }
-  return createImagePointCloudOnMain(file, options, targetCount);
+  return createImagePointCloudOnMain(file, options, targetCount, onProgress);
 }
 
 function supportsImageWorker() {
   return typeof Worker !== "undefined" && typeof URL !== "undefined";
 }
 
-function createImagePointCloudInWorker(file, options, targetCount) {
+function createImagePointCloudInWorker(file, options, targetCount, onProgress) {
   const worker = getImageWorker();
   const id = (imageWorkerJobId += 1);
   return new Promise((resolve, reject) => {
     const timeout = window.setTimeout(() => {
       imageWorkerJobs.delete(id);
       reject(new Error("图片采样超时"));
-    }, 60000);
-    imageWorkerJobs.set(id, { resolve, reject, timeout });
+    }, 120000);
+    imageWorkerJobs.set(id, { resolve, reject, timeout, onProgress });
     worker.postMessage({ id, file, options, targetCount });
   });
 }
@@ -1320,9 +2108,13 @@ function getImageWorker() {
   if (imageWorker) return imageWorker;
   imageWorker = new Worker(new URL("./image-worker.js", import.meta.url), { type: "module" });
   imageWorker.addEventListener("message", (event) => {
-    const { id, points, error } = event.data ?? {};
+    const { id, points, error, progress } = event.data ?? {};
     const job = imageWorkerJobs.get(id);
     if (!job) return;
+    if (progress) {
+      job.onProgress?.(progress);
+      return;
+    }
     window.clearTimeout(job.timeout);
     imageWorkerJobs.delete(id);
     if (error) {
@@ -1347,18 +2139,24 @@ function rejectImageWorkerJobs(message) {
   }
 }
 
-async function createImagePointCloudOnMain(file, options, targetCount) {
+async function createImagePointCloudOnMain(file, options, targetCount, onProgress) {
+  onProgress?.({ value: 0.1, label: "正在解码图片" });
   const bitmap = await createImageBitmap(file);
   const canvas = document.createElement("canvas");
-  const maxSide = Math.min(960, Math.max(620, Math.round(Math.sqrt(targetCount) * 2.15)));
+  const requestedMaxSide = Number(options.maxSide);
+  const maxSideCap = Number.isFinite(requestedMaxSide) && requestedMaxSide > 0 ? requestedMaxSide : 1800;
+  const maxSide = Math.min(maxSideCap, Math.max(900, Math.round(Math.sqrt(targetCount) * 2.6)));
   const scale = Math.min(maxSide / bitmap.width, maxSide / bitmap.height, 1);
   canvas.width = Math.max(1, Math.round(bitmap.width * scale));
   canvas.height = Math.max(1, Math.round(bitmap.height * scale));
   const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
   context.clearRect(0, 0, canvas.width, canvas.height);
   context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   bitmap.close?.();
 
+  onProgress?.({ value: 0.22, label: "正在读取像素" });
   const image = context.getImageData(0, 0, canvas.width, canvas.height);
   const width = canvas.width;
   const height = canvas.height;
@@ -1371,8 +2169,9 @@ async function createImagePointCloudOnMain(file, options, targetCount) {
   const contourStrength = THREE.MathUtils.clamp(options.contourStrength ?? 0.75, 0, 1);
   const interiorRatio = THREE.MathUtils.clamp(options.interiorRatio ?? 0.35, 0.2, 0.5);
   const colorMode = options.colorMode ?? "original";
-  const mono = new THREE.Color(options.monoColor ?? colorPicker.value);
+  const mono = hexToDisplayRgb(options.monoColor ?? colorPicker.value);
   const globalAlpha = THREE.MathUtils.clamp(options.globalAlpha ?? 1, 0, 1);
+  const alphaThreshold = options.logoMode ? 0.1 : 0.035;
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
@@ -1388,6 +2187,7 @@ async function createImagePointCloudOnMain(file, options, targetCount) {
     }
   }
 
+  onProgress?.({ value: 0.38, label: "正在分析轮廓和纹理" });
   gaussianBlur3x3(grayscale, blurred, width, height);
 
   let threshold = 0;
@@ -1407,7 +2207,7 @@ async function createImagePointCloudOnMain(file, options, targetCount) {
   for (let y = 1; y < height - 1; y += 1) {
     for (let x = 1; x < width - 1; x += 1) {
       const pixelIndex = y * width + x;
-      if (alpha[pixelIndex] < 0.502) continue;
+      if (alpha[pixelIndex] < alphaThreshold) continue;
       if (options.logoMode && !isLogoForeground(blurred[pixelIndex], threshold, logoPolarity)) continue;
       foreground[pixelIndex] = 1;
       const gx =
@@ -1441,7 +2241,8 @@ async function createImagePointCloudOnMain(file, options, targetCount) {
   }
 
   strongGradients.sort((a, b) => a - b);
-  const strongEdgeThreshold = strongGradients[Math.floor(strongGradients.length * 0.8)] ?? 0;
+  onProgress?.({ value: 0.58, label: "正在建立采样候选" });
+  const strongEdgeThreshold = strongGradients[Math.floor(strongGradients.length * 0.76)] ?? 0;
   const maxGradient = strongGradients[strongGradients.length - 1] || 1;
 
   for (let y = 1; y < height - 1; y += 1) {
@@ -1457,16 +2258,24 @@ async function createImagePointCloudOnMain(file, options, targetCount) {
       const edge = gradient[pixelIndex] / maxGradient;
       const isStrongEdge = gradient[pixelIndex] >= strongEdgeThreshold;
       const morphologyEdge =
-        options.logoMode &&
         (foreground[pixelIndex - 1] === 0 ||
           foreground[pixelIndex + 1] === 0 ||
           foreground[pixelIndex - width] === 0 ||
           foreground[pixelIndex + width] === 0);
-      const detailWeight = Math.abs(lum - 0.5) * 0.16 + localContrast(blurred, width, pixelIndex) * 0.22;
-      const edgeWeight = isStrongEdge || morphologyEdge ? 1 : Math.max(edge ** 0.66, detailWeight);
-      const baseWeight = options.logoMode ? interiorRatio : 0.1 + edge * 0.18 + detailWeight;
+      const colorDetail = localColorContrast(image.data, width, pixelIndex);
+      const chroma = Math.max(r0, g0, b0) - Math.min(r0, g0, b0);
+      const alphaDetail = localContrast(alpha, width, pixelIndex);
+      const detailWeight =
+        Math.abs(lum - 0.5) * 0.08 +
+        localContrast(blurred, width, pixelIndex) * 0.22 +
+        colorDetail * 0.68 +
+        chroma * 0.18 +
+        alphaDetail * 0.46;
+      const isAlphaEdge = alphaDetail > 0.11;
+      const edgeWeight = isStrongEdge || morphologyEdge || isAlphaEdge ? 1 : Math.max(edge ** 0.66, detailWeight);
+      const baseWeight = options.logoMode ? Math.max(interiorRatio, 0.36) : 0.26 + edge * 0.1 + detailWeight * 1.05;
       const weight = Math.max(
-        isStrongEdge || morphologyEdge ? 1 : 0,
+        isStrongEdge || morphologyEdge || isAlphaEdge ? 1 : 0,
         baseWeight * (1 - contourStrength) + edgeWeight * contourStrength,
       );
       const color = mapImageColor(r0, g0, b0, lum, colorMode, mono);
@@ -1479,7 +2288,8 @@ async function createImagePointCloudOnMain(file, options, targetCount) {
         a: a0 * globalAlpha,
         luminance: lum,
         gradient: edge,
-        strong: isStrongEdge || morphologyEdge,
+        detail: detailWeight,
+        strong: isStrongEdge || morphologyEdge || isAlphaEdge,
         weight: Math.max(0.0001, weight),
       });
     }
@@ -1493,20 +2303,31 @@ async function createImagePointCloudOnMain(file, options, targetCount) {
   const centerY = (minY + maxY) / 2;
   const maxDim = Math.max(maxX - minX, maxY - minY, 1);
   const target = Math.max(1, targetCount);
-  const selected = weightedSampleCandidates(candidates, target, options.logoMode ? 0.52 : 0.68);
+  onProgress?.({ value: 0.78, label: "正在分配高密度采样点" });
+  const selected = weightedSampleCandidates(candidates, target, options.logoMode ? 0.7 : 0.36);
   return selected.map((point, i) => ({
-      x: ((point.x - centerX) / maxDim) * 2.82,
-      y: -((point.y - centerY) / maxDim) * 2.82,
-      z: (point.a - 0.5) * 0.055 + (point.luminance - 0.5) * 0.04 + (hash01(i * 4.11) - 0.5) * 0.016,
-      r: point.r,
-      g: point.g,
-      b: point.b,
-      a: point.a,
-      mix: THREE.MathUtils.clamp((point.g * 0.45 + point.b * 0.65) / (point.r + point.g + point.b + 0.001), 0, 1),
-      glow: 0.26 + point.a * 0.18 + point.luminance * 0.12 + point.gradient * 0.18,
-      jitter: point.strong ? 0.0009 : 0.0022,
-      kind: point.strong ? 1 : 0,
-    }));
+    x:
+      ((point.x +
+        (hash01(i * 2.31) - 0.5) * (options.logoMode ? (point.strong ? 0.12 : 0.22) : point.strong ? 0.18 : 0.36) -
+        centerX) /
+        maxDim) *
+      2.82,
+    y:
+      -((point.y +
+        (hash01(i * 3.91) - 0.5) * (options.logoMode ? (point.strong ? 0.12 : 0.22) : point.strong ? 0.18 : 0.36) -
+        centerY) /
+        maxDim) *
+      2.82,
+    z: (point.a - 0.5) * 0.038 + (point.luminance - 0.5) * 0.026 + (hash01(i * 4.11) - 0.5) * 0.01,
+    r: point.r,
+    g: point.g,
+    b: point.b,
+    a: point.a,
+    mix: THREE.MathUtils.clamp((point.g * 0.45 + point.b * 0.65) / (point.r + point.g + point.b + 0.001), 0, 1),
+    glow: 0.44 + point.a * 0.2 + point.luminance * 0.13 + point.gradient * 0.16 + point.detail * 0.18,
+    jitter: point.strong ? 0.00028 : 0.00075,
+    kind: point.strong ? 1 : 0,
+  }));
 }
 
 function localContrast(values, width, index) {
@@ -1517,6 +2338,26 @@ function localContrast(values, width, index) {
     Math.abs(center - values[index - width]),
     Math.abs(center - values[index + width]),
   );
+}
+
+function localColorContrast(data, width, pixelIndex) {
+  const index = pixelIndex * 4;
+  const left = (pixelIndex - 1) * 4;
+  const right = (pixelIndex + 1) * 4;
+  const up = (pixelIndex - width) * 4;
+  const down = (pixelIndex + width) * 4;
+  let contrast = 0;
+  for (let channel = 0; channel < 3; channel += 1) {
+    const center = data[index + channel] / 255;
+    contrast = Math.max(
+      contrast,
+      Math.abs(center - data[left + channel] / 255),
+      Math.abs(center - data[right + channel] / 255),
+      Math.abs(center - data[up + channel] / 255),
+      Math.abs(center - data[down + channel] / 255),
+    );
+  }
+  return contrast;
 }
 
 function gaussianBlur3x3(source, target, width, height) {
@@ -1546,7 +2387,7 @@ function otsuThreshold(values, alpha) {
   const histogram = new Uint32Array(256);
   let total = 0;
   for (let i = 0; i < values.length; i += 1) {
-    if (alpha[i] < 0.502) continue;
+    if (alpha[i] < 0.15) continue;
     histogram[Math.round(THREE.MathUtils.clamp(values[i], 0, 1) * 255)] += 1;
     total += 1;
   }
@@ -1582,7 +2423,7 @@ function chooseLogoPolarity(values, alpha, threshold) {
   let dark = 0;
   let light = 0;
   for (let i = 0; i < values.length; i += 1) {
-    if (alpha[i] < 0.502) continue;
+    if (alpha[i] < 0.15) continue;
     if (values[i] >= threshold) light += 1;
     else dark += 1;
   }
@@ -1602,7 +2443,8 @@ function isLogoForeground(value, threshold, polarity) {
 
 function mapImageColor(r, g, b, luminance, mode, monoColor) {
   if (mode === "luminance") {
-    return { r: luminance, g: luminance, b: luminance };
+    const value = luminance;
+    return { r: value, g: value, b: value };
   }
   if (mode === "monochrome") {
     return {
@@ -1612,6 +2454,26 @@ function mapImageColor(r, g, b, luminance, mode, monoColor) {
     };
   }
   return { r, g, b };
+}
+
+function hexToDisplayRgb(hex) {
+  const clean = String(hex ?? "#ffffff").replace("#", "").trim();
+  const normalized =
+    clean.length === 3
+      ? clean
+          .split("")
+          .map((char) => `${char}${char}`)
+          .join("")
+      : clean.padEnd(6, "f").slice(0, 6);
+  const value = Number.parseInt(normalized, 16);
+  if (!Number.isFinite(value)) {
+    return { r: 1, g: 1, b: 1 };
+  }
+  return {
+    r: ((value >> 16) & 255) / 255,
+    g: ((value >> 8) & 255) / 255,
+    b: (value & 255) / 255,
+  };
 }
 
 function weightedSampleCandidates(candidates, targetCount, strongRatio) {
@@ -1648,26 +2510,40 @@ function appendMany(target, items) {
 }
 
 function weightedPickMany(candidates, count, seed) {
-  if (count <= 0) return [];
-  const cumulative = new Float32Array(candidates.length);
+  if (count <= 0 || candidates.length === 0) return [];
+  const cumulative = new Float64Array(candidates.length);
   let total = 0;
   for (let i = 0; i < candidates.length; i += 1) {
     total += candidates[i].weight;
     cumulative[i] = total;
   }
   const picked = [];
+  const stride = total / count;
+  const offset = hash01(seed * 0.37 + count * 0.017);
   for (let i = 0; i < count; i += 1) {
-    const value = hash01(i * seed + count * 0.013) * total;
+    const jitter = (hash01((i + 1) * seed + count * 0.013) - 0.5) * stride * 0.82;
+    const value = THREE.MathUtils.clamp((i + offset) * stride + jitter, 0, total - Number.EPSILON);
     picked.push(candidates[lowerBound(cumulative, value)] ?? candidates[candidates.length - 1]);
   }
   return picked;
 }
 
-async function createMeshPointCloud(file, targetCount) {
+async function createMeshPointCloud(file, targetCount, onProgress) {
   const url = URL.createObjectURL(file);
   try {
     const loader = new GLTFLoader();
-    const gltf = await loader.loadAsync(url);
+    const gltf = await new Promise((resolve, reject) => {
+      loader.load(
+        url,
+        resolve,
+        (event) => {
+          const ratio = event.total > 0 ? event.loaded / event.total : 0.35;
+          onProgress?.({ value: 0.12 + Math.min(0.38, ratio * 0.38), label: "正在读取 GLB 文件" });
+        },
+        reject,
+      );
+    });
+    onProgress?.({ value: 0.55, label: "正在解析网格表面" });
     gltf.scene.updateMatrixWorld(true);
     const triangles = [];
     const box = new THREE.Box3();
@@ -1724,7 +2600,8 @@ async function createMeshPointCloud(file, targetCount) {
     }
 
     const desiredCount = Number.isFinite(targetCount) && targetCount > 0 ? targetCount : triangles.length * 16;
-    const sampleCount = Math.min(120000, Math.max(14000, desiredCount));
+    const sampleCount = Math.min(980000, Math.max(36000, desiredCount));
+    onProgress?.({ value: 0.72, label: "正在采样模型表面" });
     const points = [];
     for (let i = 0; i < sampleCount; i += 1) {
       const pick = hash01(i * 12.9898) * totalArea;
@@ -1756,6 +2633,9 @@ async function createMeshPointCloud(file, targetCount) {
         glow: 0.54 + hash01(i * 5.91) * 0.28,
         jitter: 0.004,
       });
+      if (i > 0 && i % 18000 === 0) {
+        onProgress?.({ value: 0.72 + Math.min(0.18, (i / sampleCount) * 0.18), label: "正在采样模型表面" });
+      }
     }
     return points;
   } finally {
