@@ -114,6 +114,7 @@
                       <option value="text">文字</option>
                       <option value="ring">戒指</option>
                       <option value="balloons">气球</option>
+                      <option value="pose">姿态</option>
                       <option value="image">图片</option>
                       <option value="mesh">3D</option>
                     </select>
@@ -349,6 +350,10 @@
                       <span class="model-thumb balloons-thumb"></span>
                       <span>气球</span>
                     </button>
+                    <button class="model-button" type="button" data-model="pose">
+                      <span class="model-thumb pose-thumb"></span>
+                      <span>姿态</span>
+                    </button>
                     <button class="model-button" type="button" data-model="image">
                       <span class="model-thumb image-thumb"></span>
                       <span>图片</span>
@@ -372,6 +377,7 @@
                   <option value="text">文字</option>
                   <option value="ring">戒指</option>
                   <option value="balloons">气球</option>
+                  <option value="pose">姿态</option>
                   <option value="image">图片</option>
                   <option value="mesh">3D</option>
                 </select>
@@ -412,9 +418,24 @@
                   模型亮度
                   <button class="help-button" type="button" data-help="调节所有粒子模型的主体亮度；不会改变背景亮度。">?</button>
                 </span>
-                <span class="scale-control">
+                <span class="scale-control has-steppers">
+                  <button class="step-button" type="button" data-step-target="modelBrightness" data-step="-5" aria-label="降低模型亮度">-</button>
                   <input id="modelBrightness" type="range" min="45" max="220" step="5" value="100" />
+                  <button class="step-button" type="button" data-step-target="modelBrightness" data-step="5" aria-label="提高模型亮度">+</button>
                   <strong id="modelBrightnessValue">100%</strong>
+                </span>
+              </label>
+
+              <label class="field brightness-field">
+                <span class="field-label">
+                  模型大小
+                  <button class="help-button" type="button" data-help="直接缩放粒子模型本体，和鼠标滚轮的相机远近不同；范围较大，适合投影和大屏快速定尺寸。">?</button>
+                </span>
+                <span class="scale-control has-steppers">
+                  <button class="step-button" type="button" data-step-target="modelSize" data-step="-5" aria-label="缩小模型">-</button>
+                  <input id="modelSize" type="range" min="15" max="400" step="5" value="100" />
+                  <button class="step-button" type="button" data-step-target="modelSize" data-step="5" aria-label="放大模型">+</button>
+                  <strong id="modelSizeValue">100%</strong>
                 </span>
               </label>
             </div>
@@ -426,7 +447,7 @@
               <div class="field theme-field">
                 <span class="field-label">
                   素材
-                  <button class="help-button" type="button" data-help="图片/Logo 会生成平面彩色点云，GLB 会按模型表面采样成 3D 点云。">?</button>
+                  <button class="help-button" type="button" data-help="图片/Logo 会生成平面彩色点云，GLB 会按模型表面采样成 3D 点云，姿态视频会识别人体关键点并生成粒子骨架。">?</button>
                 </span>
                 <div class="audio-controls import-controls">
                   <label class="file-command">
@@ -436,6 +457,10 @@
                   <label class="file-command">
                     <input id="meshFileInput" type="file" accept=".glb,model/gltf-binary" />
                     <span>GLB模型</span>
+                  </label>
+                  <label class="file-command">
+                    <input id="poseVideoInput" type="file" accept="video/*" />
+                    <span>姿态视频</span>
                   </label>
                 </div>
               </div>
@@ -496,8 +521,10 @@
                     亮度
                     <button class="help-button" type="button" data-help="只增强图片/Logo 点云亮度，适合深色图片或低对比度 Logo。">?</button>
                   </span>
-                  <span class="scale-control">
+                  <span class="scale-control has-steppers">
+                    <button class="step-button" type="button" data-step-target="imageBrightness" data-step="-5" aria-label="降低图片亮度">-</button>
                     <input id="imageBrightness" type="range" min="60" max="480" step="5" value="280" />
+                    <button class="step-button" type="button" data-step-target="imageBrightness" data-step="5" aria-label="提高图片亮度">+</button>
                     <strong id="imageBrightnessValue">280%</strong>
                   </span>
                 </label>
@@ -507,8 +534,10 @@
                     大小
                     <button class="help-button" type="button" data-help="调节图片点云大小；调小会同步减少绘制粒子数，调到最大使用当前画质档全部粒子。">?</button>
                   </span>
-                  <span class="scale-control">
+                  <span class="scale-control has-steppers">
+                    <button class="step-button" type="button" data-step-target="imageSize" data-step="-5" aria-label="缩小图片粒子">-</button>
                     <input id="imageSize" type="range" min="45" max="100" step="5" value="100" />
+                    <button class="step-button" type="button" data-step-target="imageSize" data-step="5" aria-label="放大图片粒子">+</button>
                     <strong id="imageSizeValue">100%</strong>
                   </span>
                 </label>
@@ -532,6 +561,103 @@
                   <span class="scale-control">
                     <input id="imageInteriorRatio" type="range" min="0.25" max="0.7" step="0.05" value="0.5" />
                     <strong id="imageInteriorRatioValue">50%</strong>
+                  </span>
+                </label>
+              </details>
+
+              <details class="nested-section mesh-settings">
+                <summary>GLB 细节</summary>
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    密度
+                    <button class="help-button" type="button" data-help="控制 3D 点云绘制粒子量；越高表面越细，越低越流畅。重新导入 GLB 时也会影响采样目标。">?</button>
+                  </span>
+                  <span class="scale-control has-steppers">
+                    <button class="step-button" type="button" data-step-target="meshDensity" data-step="-5" aria-label="降低 GLB 密度">-</button>
+                    <input id="meshDensity" type="range" min="25" max="120" step="5" value="100" />
+                    <button class="step-button" type="button" data-step-target="meshDensity" data-step="5" aria-label="提高 GLB 密度">+</button>
+                    <strong id="meshDensityValue">100%</strong>
+                  </span>
+                </label>
+
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    大小
+                    <button class="help-button" type="button" data-help="只缩放导入的 GLB 点云目标，不影响其他内置模型。">?</button>
+                  </span>
+                  <span class="scale-control has-steppers">
+                    <button class="step-button" type="button" data-step-target="meshSize" data-step="-5" aria-label="缩小 GLB">-</button>
+                    <input id="meshSize" type="range" min="25" max="260" step="5" value="100" />
+                    <button class="step-button" type="button" data-step-target="meshSize" data-step="5" aria-label="放大 GLB">+</button>
+                    <strong id="meshSizeValue">100%</strong>
+                  </span>
+                </label>
+
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    厚度
+                    <button class="help-button" type="button" data-help="拉伸或压缩 GLB 点云的前后深度；偏平模型可适当提高。">?</button>
+                  </span>
+                  <span class="scale-control has-steppers">
+                    <button class="step-button" type="button" data-step-target="meshDepth" data-step="-5" aria-label="降低 GLB 厚度">-</button>
+                    <input id="meshDepth" type="range" min="20" max="240" step="5" value="100" />
+                    <button class="step-button" type="button" data-step-target="meshDepth" data-step="5" aria-label="提高 GLB 厚度">+</button>
+                    <strong id="meshDepthValue">100%</strong>
+                  </span>
+                </label>
+
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    表面
+                    <button class="help-button" type="button" data-help="控制 GLB 表面粒子的微抖动厚度；越低越贴合模型，越高越有粒子雾化感。">?</button>
+                  </span>
+                  <span class="scale-control has-steppers">
+                    <button class="step-button" type="button" data-step-target="meshSpread" data-step="-5" aria-label="降低表面扩散">-</button>
+                    <input id="meshSpread" type="range" min="0" max="200" step="5" value="100" />
+                    <button class="step-button" type="button" data-step-target="meshSpread" data-step="5" aria-label="提高表面扩散">+</button>
+                    <strong id="meshSpreadValue">100%</strong>
+                  </span>
+                </label>
+              </details>
+
+              <details class="nested-section pose-settings">
+                <summary>姿态视频细节</summary>
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    骨架密度
+                    <button class="help-button" type="button" data-help="控制姿态骨架可见粒子量；越高越细腻，越低越流畅。">?</button>
+                  </span>
+                  <span class="scale-control has-steppers">
+                    <button class="step-button" type="button" data-step-target="poseDensity" data-step="-5" aria-label="降低姿态密度">-</button>
+                    <input id="poseDensity" type="range" min="35" max="160" step="5" value="100" />
+                    <button class="step-button" type="button" data-step-target="poseDensity" data-step="5" aria-label="提高姿态密度">+</button>
+                    <strong id="poseDensityValue">100%</strong>
+                  </span>
+                </label>
+
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    跟随
+                    <button class="help-button" type="button" data-help="控制姿态视频抽帧频率；越高动作越跟手，但会增加设备压力。">?</button>
+                  </span>
+                  <span class="scale-control has-steppers">
+                    <button class="step-button" type="button" data-step-target="poseFollow" data-step="-5" aria-label="降低姿态跟随">-</button>
+                    <input id="poseFollow" type="range" min="45" max="180" step="5" value="100" />
+                    <button class="step-button" type="button" data-step-target="poseFollow" data-step="5" aria-label="提高姿态跟随">+</button>
+                    <strong id="poseFollowValue">100%</strong>
+                  </span>
+                </label>
+
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    光晕
+                    <button class="help-button" type="button" data-help="控制姿态关节与手脚端点的额外光晕数量；越高越有舞台拖影感。">?</button>
+                  </span>
+                  <span class="scale-control has-steppers">
+                    <button class="step-button" type="button" data-step-target="poseAura" data-step="-5" aria-label="降低姿态光晕">-</button>
+                    <input id="poseAura" type="range" min="0" max="180" step="5" value="100" />
+                    <button class="step-button" type="button" data-step-target="poseAura" data-step="5" aria-label="提高姿态光晕">+</button>
+                    <strong id="poseAuraValue">100%</strong>
                   </span>
                 </label>
               </details>

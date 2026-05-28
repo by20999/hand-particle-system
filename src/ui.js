@@ -80,10 +80,27 @@ export function createUI() {
     modelPlaceholderButtons: [...document.querySelectorAll("[data-model-placeholder]")],
     modelBrightness: document.querySelector("#modelBrightness"),
     modelBrightnessValue: document.querySelector("#modelBrightnessValue"),
+    modelSize: document.querySelector("#modelSize"),
+    modelSizeValue: document.querySelector("#modelSizeValue"),
     micToggleBtn: document.querySelector("#micToggleBtn"),
     audioFileInput: document.querySelector("#audioFileInput"),
     imageFileInput: document.querySelector("#imageFileInput"),
     meshFileInput: document.querySelector("#meshFileInput"),
+    poseVideoInput: document.querySelector("#poseVideoInput"),
+    meshDensity: document.querySelector("#meshDensity"),
+    meshDensityValue: document.querySelector("#meshDensityValue"),
+    meshSize: document.querySelector("#meshSize"),
+    meshSizeValue: document.querySelector("#meshSizeValue"),
+    meshDepth: document.querySelector("#meshDepth"),
+    meshDepthValue: document.querySelector("#meshDepthValue"),
+    meshSpread: document.querySelector("#meshSpread"),
+    meshSpreadValue: document.querySelector("#meshSpreadValue"),
+    poseDensity: document.querySelector("#poseDensity"),
+    poseDensityValue: document.querySelector("#poseDensityValue"),
+    poseFollow: document.querySelector("#poseFollow"),
+    poseFollowValue: document.querySelector("#poseFollowValue"),
+    poseAura: document.querySelector("#poseAura"),
+    poseAuraValue: document.querySelector("#poseAuraValue"),
     imageContour: document.querySelector("#imageContour"),
     imageContourValue: document.querySelector("#imageContourValue"),
     imageColorMode: document.querySelector("#imageColorMode"),
@@ -97,6 +114,7 @@ export function createUI() {
     imageLogoMode: document.querySelector("#imageLogoMode"),
     imageInteriorRatio: document.querySelector("#imageInteriorRatio"),
     imageInteriorRatioValue: document.querySelector("#imageInteriorRatioValue"),
+    stepButtons: [...document.querySelectorAll("[data-step-target]")],
     importProgress: document.querySelector("#importProgress"),
     importProgressLabel: document.querySelector("#importProgressLabel"),
     importProgressValue: document.querySelector("#importProgressValue"),
@@ -116,6 +134,7 @@ export function createUI() {
   initTextFont(refs);
   initImageOptions(refs);
   initBrightnessControls(refs);
+  initRangeSteppers(refs);
   initAudioSpectrum(refs);
   initHelpButtons(refs);
 
@@ -139,6 +158,9 @@ export function createUI() {
     getImageBrightness: () => Number(refs.imageBrightness?.value ?? 280) / 100,
     getImageSize: () => Number(refs.imageSize?.value ?? 100) / 100,
     getModelBrightness: () => Number(refs.modelBrightness?.value ?? 100) / 100,
+    getModelSize: () => Number(refs.modelSize?.value ?? 100) / 100,
+    getMeshOptions: () => getMeshOptions(refs),
+    getPoseOptions: () => getPoseOptions(refs),
     getBackgroundBrightness: () => Number(refs.backgroundBrightness?.value ?? 100) / 100,
     updateImageSizeLabel: (particleCount) => updateImageSizeLabel(refs, particleCount),
     getShowPresetId: () => refs.showPresetSelect?.value ?? "auto",
@@ -439,7 +461,15 @@ function initBrightnessControls(refs) {
     { input: refs.imageBrightness, output: refs.imageBrightnessValue, storage: "imageBrightness", fallback: 280 },
     { input: refs.imageSize, output: refs.imageSizeValue, storage: "imageSize", fallback: 100 },
     { input: refs.modelBrightness, output: refs.modelBrightnessValue, storage: "modelBrightness", fallback: 100 },
+    { input: refs.modelSize, output: refs.modelSizeValue, storage: "modelSize", fallback: 100 },
     { input: refs.backgroundBrightness, output: refs.backgroundBrightnessValue, storage: "backgroundBrightness", fallback: 100 },
+    { input: refs.meshDensity, output: refs.meshDensityValue, storage: "meshDensity", fallback: 100 },
+    { input: refs.meshSize, output: refs.meshSizeValue, storage: "meshSize", fallback: 100 },
+    { input: refs.meshDepth, output: refs.meshDepthValue, storage: "meshDepth", fallback: 100 },
+    { input: refs.meshSpread, output: refs.meshSpreadValue, storage: "meshSpread", fallback: 100 },
+    { input: refs.poseDensity, output: refs.poseDensityValue, storage: "poseDensity", fallback: 100 },
+    { input: refs.poseFollow, output: refs.poseFollowValue, storage: "poseFollow", fallback: 100 },
+    { input: refs.poseAura, output: refs.poseAuraValue, storage: "poseAura", fallback: 100 },
   ];
 
   for (const control of controls) {
@@ -454,6 +484,42 @@ function initBrightnessControls(refs) {
       const nextValue = Number(control.input.value);
       updatePercentLabel(control.output, nextValue);
       safeWriteStorage(control.storage, String(nextValue));
+    });
+  }
+}
+
+function initRangeSteppers(refs) {
+  const byId = new Map(
+    [
+      refs.modelBrightness,
+      refs.modelSize,
+      refs.imageBrightness,
+      refs.imageSize,
+      refs.backgroundBrightness,
+      refs.sensitivity,
+      refs.pointingSensitivity,
+      refs.meshDensity,
+      refs.meshSize,
+      refs.meshDepth,
+      refs.meshSpread,
+      refs.poseDensity,
+      refs.poseFollow,
+      refs.poseAura,
+    ]
+      .filter(Boolean)
+      .map((input) => [input.id, input]),
+  );
+
+  for (const button of refs.stepButtons ?? []) {
+    button.addEventListener("click", () => {
+      const input = byId.get(button.dataset.stepTarget);
+      if (!input) return;
+      const step = Number(button.dataset.step) || Number(input.step) || 1;
+      const min = Number(input.min);
+      const max = Number(input.max);
+      const next = THREE.MathUtils.clamp(Number(input.value) + step, min, max);
+      input.value = String(next);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
     });
   }
 }
@@ -482,6 +548,23 @@ function getImageOptions(refs) {
     globalAlpha: Number(refs.imageAlpha?.value ?? 1),
     logoMode: Boolean(refs.imageLogoMode?.checked),
     interiorRatio: Number(refs.imageInteriorRatio?.value ?? 0.35),
+  };
+}
+
+function getMeshOptions(refs) {
+  return {
+    density: Number(refs.meshDensity?.value ?? 100) / 100,
+    size: Number(refs.meshSize?.value ?? 100) / 100,
+    depth: Number(refs.meshDepth?.value ?? 100) / 100,
+    spread: Number(refs.meshSpread?.value ?? 100) / 100,
+  };
+}
+
+function getPoseOptions(refs) {
+  return {
+    density: Number(refs.poseDensity?.value ?? 100) / 100,
+    follow: Number(refs.poseFollow?.value ?? 100) / 100,
+    aura: Number(refs.poseAura?.value ?? 100) / 100,
   };
 }
 

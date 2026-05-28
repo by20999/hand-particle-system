@@ -241,15 +241,16 @@ export function writeTextTargets(text, buffers, fontId = "modern") {
   }
 }
 
-export function writePointCloudTargets(points, buffers) {
+export function writePointCloudTargets(points, buffers, limit = buffers.count) {
   const safePoints = Array.isArray(points) && points.length > 0 ? points : [{ x: 0, y: 0, z: 0, mix: 0.4, glow: 1 }];
   const { count, targets, colorMixes, particleColors, brightnesses, targetRadii, targetDirX, targetDirY, targetDirZ, targetKinds } =
     buffers;
+  const writeCount = Math.max(1, Math.min(count, Math.round(limit)));
 
-  for (let i = 0; i < count; i += 1) {
+  for (let i = 0; i < writeCount; i += 1) {
     const pointIndex =
-      safePoints.length >= count
-        ? Math.min(safePoints.length - 1, Math.floor(((i + hash(i * 4.19)) / count) * safePoints.length))
+      safePoints.length >= writeCount
+        ? Math.min(safePoints.length - 1, Math.floor(((i + hash(i * 4.19)) / writeCount) * safePoints.length))
         : Math.floor(hash(i * 11.31) * safePoints.length);
     const point = safePoints[pointIndex] ?? safePoints[0];
     const jitter = point.jitter ?? 0.006;

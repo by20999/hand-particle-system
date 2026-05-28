@@ -732,6 +732,35 @@ h1 {
   border-radius: 0;
 }
 
+.pose-thumb {
+  border-radius: 8px;
+}
+
+.pose-thumb::before {
+  content: "";
+  position: absolute;
+  inset: 3px 4px;
+  background:
+    radial-gradient(circle at 50% 8%, #fff 0 7%, transparent 8%),
+    linear-gradient(90deg, transparent 0 46%, var(--accent-secondary) 47% 53%, transparent 54%),
+    linear-gradient(35deg, transparent 0 38%, var(--accent-primary) 39% 45%, transparent 46%),
+    linear-gradient(145deg, transparent 0 38%, var(--accent-primary) 39% 45%, transparent 46%),
+    linear-gradient(68deg, transparent 0 44%, color-mix(in srgb, var(--theme-rim) 86%, #fff) 45% 51%, transparent 52%),
+    linear-gradient(112deg, transparent 0 44%, color-mix(in srgb, var(--theme-rim) 86%, #fff) 45% 51%, transparent 52%);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent-secondary) 70%, transparent));
+}
+
+.pose-thumb::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 3px;
+  height: 1px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-primary) 72%, transparent);
+}
+
 .text-thumb {
   display: grid;
   place-items: center;
@@ -830,7 +859,7 @@ h1 {
 
 .audio-controls {
   display: grid;
-  grid-template-columns: 1fr 1fr 48px 44px;
+  grid-template-columns: minmax(64px, 1fr) minmax(56px, 0.85fr) minmax(52px, 0.7fr) minmax(42px, auto);
   gap: 8px;
   align-items: center;
 }
@@ -886,6 +915,10 @@ h1 {
 
 .import-controls {
   grid-template-columns: 1fr 1fr;
+}
+
+.utility-controls {
+  grid-template-columns: repeat(2, minmax(72px, 1fr));
 }
 
 .show-controls {
@@ -1073,13 +1106,18 @@ h1 {
 .file-command span {
   display: grid;
   place-items: center;
+  min-width: 0;
   height: 34px;
+  padding: 0 8px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.08);
   color: #f5f7fb;
   font: inherit;
   font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  word-break: keep-all;
   cursor: pointer;
 }
 
@@ -1229,6 +1267,31 @@ input[type="color"] {
   gap: 10px;
 }
 
+.scale-control.has-steppers {
+  grid-template-columns: 18px minmax(0, 1fr) 18px minmax(48px, auto);
+  gap: 5px;
+}
+
+.step-button {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.055);
+  color: #edf4fb;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.step-button:hover {
+  border-color: color-mix(in srgb, var(--accent-primary) 70%, #ffffff 30%);
+  background: color-mix(in srgb, var(--accent-primary) 16%, transparent);
+}
+
 .scale-control input[type="range"] {
   width: 100%;
   accent-color: var(--accent-primary);
@@ -1329,7 +1392,7 @@ input[type="color"] {
   }
 
   .audio-controls {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(72px, 1fr));
   }
 
   .show-editor {

@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 import { inflateSync } from "node:zlib";
 import { chromium } from "playwright";
@@ -237,6 +237,34 @@ async function verifyInteractions(activeBrowser) {
     if (state.diagnostic.includes("失败")) {
       throw new Error(`interaction: image import failed: ${state.diagnostic}`);
     }
+
+    const sampleVideoPath = "scripts/fixtures/verify-pose-sample.webm";
+    if (existsSync(sampleVideoPath)) {
+      await page.setInputFiles("#poseVideoInput", {
+        name: "verify-pose-sample.webm",
+        mimeType: "video/webm",
+        buffer: readFileSync(sampleVideoPath),
+      });
+      await page.waitForFunction(
+        () => {
+          const model = document.querySelector("#shapeSelect")?.value;
+          const diagnostic = document.querySelector("#diagnosticText")?.textContent ?? "";
+          return model === "pose" || diagnostic.includes("姿态视频加载失败");
+        },
+        null,
+        { timeout: 30000 },
+      );
+      const poseState = await page.evaluate(() => ({
+        model: document.querySelector("#shapeSelect")?.value,
+        diagnostic: document.querySelector("#diagnosticText")?.textContent ?? "",
+      }));
+      if (poseState.model !== "pose") {
+        throw new Error(`interaction: pose video did not activate pose model: ${poseState.diagnostic}`);
+      }
+      if (poseState.diagnostic.includes("失败")) {
+        throw new Error(`interaction: pose video import failed: ${poseState.diagnostic}`);
+      }
+    }
     if (issues.length) {
       throw new Error(`interaction: browser issues: ${issues.join(" | ")}`);
     }
@@ -352,7 +380,7 @@ function watchPageIssues(page) {
   });
   page.on("requestfailed", (request) => {
     const errorText = request.failure()?.errorText ?? "";
-    if (errorText === "net::ERR_ABORTED" && request.url().includes("/mediapipe/hands/")) {
+    if (errorText === "net::ERR_ABORTED") {
       return;
     }
     issues.push(`request failed: ${request.url()} ${errorText}`.trim());

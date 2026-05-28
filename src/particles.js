@@ -300,7 +300,8 @@ export function createParticleSystem({ count, color, accent = "#52d7de", pixelRa
   };
 }
 
-export function setParticleTargets(particles, model) {
+export function setParticleTargets(particles, model, options = {}) {
+  const writeCount = resolveTargetWriteCount(particles, options.writeCount);
   particles.currentModel = model;
   if (model === "text") {
     writeTextTargets(particles.customText, particles, particles.textFont);
@@ -308,21 +309,30 @@ export function setParticleTargets(particles, model) {
     writePointCloudTargets(particles.customImagePoints, particles);
   } else if (model === "mesh") {
     writePointCloudTargets(particles.customMeshPoints, particles);
+  } else if (model === "pose") {
+    writePointCloudTargets(particles.customPosePoints, particles, writeCount);
   } else {
     writeShapeTargets(model, particles);
   }
-  syncTargetDirectionAttribute(particles);
-  syncParticleParamsAttribute(particles);
-  syncSimulationTargetTexture(particles);
-  particles.geometry.attributes.aTarget.needsUpdate = true;
-  particles.geometry.attributes.aTargetDir.needsUpdate = true;
-  particles.geometry.attributes.aTargetMeta.needsUpdate = true;
-  particles.geometry.attributes.aParticleParams.needsUpdate = true;
-  particles.geometry.attributes.aParticleColor.needsUpdate = true;
-  particles.material.uniforms.uUseVertexColor.value = model === "image" || model === "mesh" ? 1 : 0;
-  particles.baseBrightnesses.set(particles.brightnesses);
-  syncTargetMetaAttribute(particles);
-  particles.geometry.attributes.aTargetMeta.needsUpdate = true;
+  const updatedCount = model === "pose" ? writeCount : particles.count;
+  syncTargetDirectionAttribute(particles, updatedCount);
+  syncParticleParamsAttribute(particles, updatedCount);
+  if (model !== "pose") {
+    syncSimulationTargetTexture(particles, updatedCount);
+  }
+  markAttributeUpdated(particles.geometry.attributes.aTarget, updatedCount);
+  markAttributeUpdated(particles.geometry.attributes.aTargetDir, updatedCount);
+  markAttributeUpdated(particles.geometry.attributes.aTargetMeta, updatedCount);
+  markAttributeUpdated(particles.geometry.attributes.aParticleParams, updatedCount);
+  markAttributeUpdated(particles.geometry.attributes.aParticleColor, updatedCount);
+  particles.material.uniforms.uUseVertexColor.value = model === "image" || model === "mesh" || model === "pose" ? 1 : 0;
+  if (updatedCount < particles.count) {
+    particles.baseBrightnesses.set(particles.brightnesses.subarray(0, updatedCount), 0);
+  } else {
+    particles.baseBrightnesses.set(particles.brightnesses);
+  }
+  syncTargetMetaAttribute(particles, updatedCount);
+  markAttributeUpdated(particles.geometry.attributes.aTargetMeta, updatedCount);
 }
 
 export function setCustomText(particles, text, fontId = particles.textFont ?? "modern") {
@@ -348,10 +358,30 @@ export function setMeshPoints(particles, points) {
   setParticleTargets(particles, "mesh");
 }
 
+export function setPosePoints(particles, points, writeCount = particles.visibleCount ?? particles.count) {
+  particles.customPosePoints = points;
+  setParticleTargets(particles, "pose", { writeCount });
+}
+
 export function setParticleDrawCount(particles, visibleCount) {
   const count = Math.max(1, Math.min(particles.count, Math.round(visibleCount)));
   particles.visibleCount = count;
   particles.geometry.setDrawRange(0, count);
+}
+
+function resolveTargetWriteCount(particles, value) {
+  const numeric = Number(value);
+  return Math.max(1, Math.min(particles.count, Math.round(Number.isFinite(numeric) ? numeric : particles.count)));
+}
+
+function markAttributeUpdated(attribute, itemCount) {
+  if (!attribute) return;
+  const componentCount = Math.max(1, Math.min(attribute.array.length, Math.round(itemCount) * attribute.itemSize));
+  attribute.clearUpdateRanges?.();
+  if (componentCount < attribute.array.length) {
+    attribute.addUpdateRange?.(0, componentCount);
+  }
+  attribute.needsUpdate = true;
 }
 
 export function snapParticlesToTargets(particles) {
@@ -401,10 +431,12 @@ export function updateParticles(particles, state, options) {
   const onsetPulse = audio.onset ?? 0;
   const isTextModel = state.model === "text";
   const isImageModel = state.model === "image";
+  const isPoseModel = state.model === "pose";
   const isFlowerModel = state.model === "flower";
   const isFireworksModel = state.model === "fireworks";
   const modelBrightness = THREE.MathUtils.clamp(state.modelBrightness ?? 1, 0.35, 2.4);
-  const imageBrightness = isImageModel ? THREE.MathUtils.clamp(state.imageBrightness ?? 2.8, 0.45, 5.2) : 1;
+  const modelSize = THREE.MathUtils.clamp(state.modelSize ?? 1, 0.15, 4);
+  const imageBrightness = isImageModel || isPoseModel ? THREE.MathUtils.clamp(state.imageBrightness ?? 2.8, 0.45, 5.2) : 1;
   const imageScale = isImageModel ? THREE.MathUtils.clamp(state.imageSize ?? 1, 0.45, 1) : 1;
   const pointingBlend = THREE.MathUtils.clamp(state.pointingBlend ?? 0, 0, 1);
   const shapeGestureCap = THREE.MathUtils.lerp(1, 0.012, pointingBlend);
@@ -419,9 +451,19 @@ export function updateParticles(particles, state, options) {
   );
   const musicTransient = Math.min(1, musicImpact * 0.38 + Math.max(0, bassLevel - audioLevel * 0.62) * 0.16);
   const musicShimmer = Math.min(1, THREE.MathUtils.smoothstep(trebleLevel, 0.34, 0.88) * 0.62 + midLevel * 0.05);
-  const baseModelScale = isTextModel ? 0.62 : isImageModel ? 0.84 * imageScale : isFireworksModel ? 0.72 : isFlowerModel ? 0.62 : 0.72;
+  const baseModelScale = isTextModel
+    ? 0.62
+    : isImageModel
+      ? 0.84 * imageScale
+      : isPoseModel
+        ? 0.72
+        : isFireworksModel
+          ? 0.72
+          : isFlowerModel
+            ? 0.62
+            : 0.72;
   const gestureScale = isTextModel ? 1.72 : isFireworksModel ? 0.22 : 2.38;
-  const modelScale = MODEL_SCALE * (baseModelScale + shapeGesture * gestureScale) * (1 + musicTransient * 0.045);
+  const modelScale = MODEL_SCALE * (baseModelScale + shapeGesture * gestureScale) * modelSize * (1 + musicTransient * 0.045);
   const diffusion = recovering
     ? 0.04 + shapeGesture * 0.28
     : 0.05 +
@@ -474,46 +516,53 @@ export function updateParticles(particles, state, options) {
   material.uniforms.uMusicShimmer.value = musicShimmer;
   material.uniforms.uFireworkExplosion.value = fireworkExplosion;
   material.uniforms.uModelType.value = isTextModel ? 4 : isFireworksModel ? 3 : isFlowerModel ? 1 : state.model === "saturn" ? 2 : 0;
+  if (material.uniforms.uSimulationBlend) {
+    material.uniforms.uSimulationBlend.value = isPoseModel ? 0 : 0.32;
+  }
   material.uniforms.uModelBrightness.value = modelBrightness;
   material.uniforms.uImageBrightness.value = imageBrightness;
   material.uniforms.uPointer.value.lerp(pointerDirection, pointingBlend > 0.04 ? 0.1 : 0.18);
 
-  const bloomToneDown = isImageModel ? 0.48 : isTextModel ? 0.6 : isFireworksModel ? 0.76 : 0.7;
-  const brightnessBloom = THREE.MathUtils.clamp(modelBrightness * (isImageModel ? Math.pow(imageBrightness, 0.32) : 1), 0.62, 1.9);
+  const bloomToneDown = isImageModel ? 0.48 : isPoseModel ? 0.58 : isTextModel ? 0.6 : isFireworksModel ? 0.76 : 0.7;
+  const brightnessBloom = THREE.MathUtils.clamp(modelBrightness * (isImageModel || isPoseModel ? Math.pow(imageBrightness, 0.32) : 1), 0.62, 1.9);
   const rawBloom =
     (0.3 +
       shapeGesture * 0.16 +
       transitionBoost * 0.12 +
       musicImpact * 0.2 +
       musicShimmer * 0.025 +
+      (isPoseModel ? musicTransient * 0.08 + musicShimmer * 0.03 : 0) +
       (isFireworksModel ? fireworkExplosion * 0.34 : 0)) *
     bloomToneDown *
     brightnessBloom;
-  bloomPass.strength = THREE.MathUtils.clamp(rawBloom, 0.18, isImageModel ? 0.9 : isFireworksModel ? 0.76 : 0.68);
+  bloomPass.strength = THREE.MathUtils.clamp(rawBloom, 0.18, isImageModel ? 0.9 : isPoseModel ? 0.74 : isFireworksModel ? 0.76 : 0.68);
   const imagePointBoost = isImageModel ? 0.9 + imageScale * 0.18 + Math.min(imageBrightness, 4.2) * 0.045 : 1;
   material.uniforms.uPointSize.value =
-    ((isTextModel ? 11.8 : isImageModel ? 10.8 : isFireworksModel ? 6.5 : 16.4) +
-      shapeGesture * (isTextModel ? 1.9 : isImageModel ? 1.0 : isFireworksModel ? 0.75 : 3.6) +
-      musicImpact * (isImageModel ? 1.1 : isFireworksModel ? 1.9 : 2.8) +
+    ((isTextModel ? 11.8 : isImageModel ? 10.8 : isPoseModel ? 8.8 : isFireworksModel ? 6.5 : 16.4) +
+      shapeGesture * (isTextModel ? 1.9 : isImageModel ? 1.0 : isPoseModel ? 0.8 : isFireworksModel ? 0.75 : 3.6) +
+      musicImpact * (isImageModel ? 1.1 : isPoseModel ? 1.45 : isFireworksModel ? 1.9 : 2.8) +
       (isFireworksModel ? fireworkExplosion * 3.4 : 0)) *
     imagePointBoost;
-  updateFboSimulation(particles, options.renderer, {
-    delta,
-    elapsed,
-    modelScale,
-    shapeGesture,
-    diffusion,
-    transitionBoost,
-    musicImpact,
-    pointer: material.uniforms.uPointer.value,
-    modelType: material.uniforms.uModelType.value,
-  });
+  if (!isPoseModel) {
+    updateFboSimulation(particles, options.renderer, {
+      delta,
+      elapsed,
+      modelScale,
+      shapeGesture,
+      diffusion,
+      transitionBoost,
+      musicImpact,
+      pointer: material.uniforms.uPointer.value,
+      modelType: material.uniforms.uModelType.value,
+    });
+  }
   onGestureUpdate(Math.round(g * 100));
 }
 
-function syncTargetDirectionAttribute(particles) {
+function syncTargetDirectionAttribute(particles, limit = particles.count) {
   const { count, targetDirX, targetDirY, targetDirZ, targetDirections } = particles;
-  for (let i = 0; i < count; i += 1) {
+  const writeCount = Math.max(1, Math.min(count, Math.round(limit)));
+  for (let i = 0; i < writeCount; i += 1) {
     const i3 = i * 3;
     targetDirections[i3] = targetDirX[i];
     targetDirections[i3 + 1] = targetDirY[i];
@@ -521,9 +570,10 @@ function syncTargetDirectionAttribute(particles) {
   }
 }
 
-function syncTargetMetaAttribute(particles) {
+function syncTargetMetaAttribute(particles, limit = particles.count) {
   const { count, targetRadii, targetKinds, baseBrightnesses, targetMeta } = particles;
-  for (let i = 0; i < count; i += 1) {
+  const writeCount = Math.max(1, Math.min(count, Math.round(limit)));
+  for (let i = 0; i < writeCount; i += 1) {
     const i3 = i * 3;
     targetMeta[i3] = targetRadii[i];
     targetMeta[i3 + 1] = targetKinds[i];
@@ -531,9 +581,10 @@ function syncTargetMetaAttribute(particles) {
   }
 }
 
-function syncParticleParamsAttribute(particles) {
+function syncParticleParamsAttribute(particles, limit = particles.count) {
   const { count, randomness, colorMixes, particleParams } = particles;
-  for (let i = 0; i < count; i += 1) {
+  const writeCount = Math.max(1, Math.min(count, Math.round(limit)));
+  for (let i = 0; i < writeCount; i += 1) {
     const i2 = i * 2;
     particleParams[i2] = randomness[i];
     particleParams[i2 + 1] = colorMixes[i];
@@ -667,17 +718,22 @@ function dataTexture(data, size) {
   return texture;
 }
 
-function syncSimulationTargetTexture(particles) {
+function syncSimulationTargetTexture(particles, limit = particles.count) {
   const simulation = particles.simulation;
   if (!simulation?.enabled) return;
   const { count, targets } = particles;
-  for (let i = 0; i < count; i += 1) {
+  const writeCount = Math.max(1, Math.min(count, Math.round(limit)));
+  for (let i = 0; i < writeCount; i += 1) {
     const i3 = i * 3;
     const i4 = i * 4;
     simulation.targetData[i4] = targets[i3];
     simulation.targetData[i4 + 1] = targets[i3 + 1];
     simulation.targetData[i4 + 2] = targets[i3 + 2];
     simulation.targetData[i4 + 3] = 1;
+  }
+  simulation.targetTexture.clearUpdateRanges?.();
+  if (writeCount < count) {
+    simulation.targetTexture.addUpdateRange?.(0, writeCount * 4);
   }
   simulation.targetTexture.needsUpdate = true;
 }

@@ -1,6 +1,7 @@
 export const MODEL_SCALE = 2.25;
 export const START_SCALE = MODEL_SCALE * 0.86;
 export const MP_HANDS_ASSET_BASE = `${import.meta.env.BASE_URL}mediapipe/hands/`;
+export const MP_POSE_ASSET_BASE = `${import.meta.env.BASE_URL}mediapipe/pose/`;
 
 const QUALITY_PROFILES = {
   compact: {

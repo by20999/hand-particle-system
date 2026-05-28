@@ -13,7 +13,7 @@ import {
   setBackgroundMode,
   updateBackground,
 } from "./backgrounds.js";
-import { MP_HANDS_ASSET_BASE, renderPixelRatio, selectQualityProfile } from "./config.js";
+import { MP_HANDS_ASSET_BASE, MP_POSE_ASSET_BASE, renderPixelRatio, selectQualityProfile } from "./config.js";
 import {
   average,
   calculateHandOpenness,
@@ -31,6 +31,7 @@ import {
   setMeshPoints,
   setParticleDrawCount,
   setParticleTargets,
+  setPosePoints,
   setTextFont,
   snapParticlesToTargets,
   updateParticles,
@@ -76,12 +77,21 @@ const {
   backgroundBrightness,
   modelPlaceholderButtons,
   modelBrightness,
+  modelSize,
   micToggleBtn,
   audioFileInput,
   imageFileInput,
   imageBrightness,
   imageSize,
   meshFileInput,
+  poseVideoInput,
+  meshDensity,
+  meshSize,
+  meshDepth,
+  meshSpread,
+  poseDensity,
+  poseFollow,
+  poseAura,
   audioStopBtn,
 } = ui.refs;
 
@@ -153,6 +163,47 @@ const audioReactor = createAudioReactor();
 let imageWorker = null;
 let imageWorkerJobId = 0;
 const imageWorkerJobs = new Map();
+let meshBasePoints = [];
+let meshOptionsFrame = 0;
+let poseTracker = null;
+let poseVideoElement = null;
+let poseFrameTimer = 0;
+const POSE_FRAME_INTERVAL_MS = qualityProfile.id === "compact" ? 125 : qualityProfile.id === "balanced" ? 95 : 72;
+const POSE_CONNECTIONS_LOCAL = [
+  [11, 12],
+  [11, 13],
+  [13, 15],
+  [15, 17],
+  [15, 19],
+  [15, 21],
+  [17, 19],
+  [12, 14],
+  [14, 16],
+  [16, 18],
+  [16, 20],
+  [16, 22],
+  [18, 20],
+  [11, 23],
+  [12, 24],
+  [23, 24],
+  [23, 25],
+  [25, 27],
+  [27, 29],
+  [29, 31],
+  [27, 31],
+  [24, 26],
+  [26, 28],
+  [28, 30],
+  [30, 32],
+  [28, 32],
+  [0, 11],
+  [0, 12],
+];
+const POSE_NODE_IDS = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+const POSE_DETAIL_NODE_IDS = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
+const POSE_LEFT_IDS = new Set([1, 2, 3, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31]);
+const POSE_RIGHT_IDS = new Set([4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32]);
+const POSE_CORE_IDS = new Set([0, 11, 12, 23, 24]);
 
 const SHOW_PRESETS = {
   auto: {
@@ -306,7 +357,7 @@ const SHOW_PRESETS = {
 ui.setShowPresetOptions(showPresetOptionList());
 
 const CUSTOM_SHOW_STORAGE_KEY = "customShowPreset";
-const SHOW_MODELS = new Set(["heart", "flower", "saturn", "fireworks", "ring", "cake", "balloons", "text", "image", "mesh"]);
+const SHOW_MODELS = new Set(["heart", "flower", "saturn", "fireworks", "ring", "cake", "balloons", "text", "pose", "image", "mesh"]);
 const SHOW_BACKGROUNDS = new Set(["nebula", "stage", "minimal", "fireworks", "aurora", "lattice", "sunset"]);
 const SHOW_THEMES = new Set(THEMES.map((theme) => theme.id));
 const CAMERA_SHOTS = {
@@ -362,6 +413,9 @@ const state = {
   sensitivity: ui.getSensitivity(),
   pointingSensitivity: ui.getPointingSensitivity(),
   modelBrightness: ui.getModelBrightness(),
+  modelSize: ui.getModelSize(),
+  meshOptions: ui.getMeshOptions(),
+  poseOptions: ui.getPoseOptions(),
   imageBrightness: ui.getImageBrightness(),
   imageSize: ui.getImageSize(),
   backgroundBrightness: ui.getBackgroundBrightness(),
@@ -390,6 +444,11 @@ const state = {
   detectedHands: [],
   modelReady: false,
   cameraReady: false,
+  poseVideoActive: false,
+  poseProcessingVideo: false,
+  poseLastFrameAt: 0,
+  poseResultFrames: 0,
+  poseVideoFrames: 0,
   resultFrames: 0,
   sentFrames: 0,
   sendFailures: 0,
@@ -729,6 +788,10 @@ modelBrightness?.addEventListener("input", () => {
   syncParticleBrightnessUniforms();
 });
 
+modelSize?.addEventListener("input", () => {
+  state.modelSize = ui.getModelSize();
+});
+
 imageBrightness?.addEventListener("input", () => {
   state.imageBrightness = ui.getImageBrightness();
   syncParticleBrightnessUniforms();
@@ -738,6 +801,26 @@ imageSize?.addEventListener("input", () => {
   state.imageSize = ui.getImageSize();
   syncParticleDrawRange();
 });
+
+for (const input of [meshDensity, meshSize, meshDepth, meshSpread]) {
+  input?.addEventListener("input", () => {
+    state.meshOptions = ui.getMeshOptions();
+    if (input === meshDensity) {
+      syncParticleDrawRange();
+      return;
+    }
+    scheduleMeshOptionsUpdate();
+  });
+}
+
+for (const input of [poseDensity, poseFollow, poseAura]) {
+  input?.addEventListener("input", () => {
+    state.poseOptions = ui.getPoseOptions();
+    if (input === poseDensity) {
+      syncParticleDrawRange();
+    }
+  });
+}
 
 micToggleBtn.addEventListener("click", async () => {
   try {
@@ -802,16 +885,19 @@ meshFileInput?.addEventListener("change", async () => {
   try {
     ui.setImportProgress({ active: true, value: 0.06, label: "准备读取 GLB" });
     showHeldDiagnostic("正在读取 GLB 并采样模型表面", 60000);
+    state.meshOptions = ui.getMeshOptions();
     const meshSampleTarget = Math.min(
       qualityProfile.maxMeshSamples ?? 360000,
-      Math.round(particles.count * (qualityProfile.meshSampleMultiplier ?? 1)),
+      Math.round(particles.count * (qualityProfile.meshSampleMultiplier ?? 1) * THREE.MathUtils.clamp(state.meshOptions.density, 0.25, 1.2)),
     );
     const points = await createMeshPointCloud(file, meshSampleTarget, (progress) => {
       ui.setImportProgress({ active: true, ...progress });
     });
     ui.setImportProgress({ active: true, value: 0.94, label: "正在生成 3D 粒子" });
-    setMeshPoints(particles, points);
+    meshBasePoints = points;
+    setMeshPoints(particles, transformMeshPoints(meshBasePoints, state.meshOptions));
     selectModel("mesh", true);
+    syncParticleDrawRange();
     ui.setImportProgress({ active: true, value: 1, label: "GLB 导入完成" });
     showHeldDiagnostic(`GLB 模型已生成 ${points.length} 个 3D 表面采样点`, 8000);
     window.setTimeout(() => ui.setImportProgress({ active: false }), 900);
@@ -821,6 +907,26 @@ meshFileInput?.addEventListener("change", async () => {
     showHeldDiagnostic(`加载失败，请重新导入：${error?.message ?? "unknown error"}`, 12000);
   } finally {
     meshFileInput.value = "";
+  }
+});
+
+poseVideoInput?.addEventListener("change", async () => {
+  const [file] = poseVideoInput.files ?? [];
+  if (!file) return;
+  try {
+    ui.setImportProgress({ active: true, value: 0.06, label: "准备读取姿态视频" });
+    showHeldDiagnostic("正在加载姿态视频，首次使用会加载 MediaPipe Pose 模型", 60000);
+    await startPoseVideo(file);
+    selectModel("pose", true);
+    ui.setImportProgress({ active: true, value: 1, label: "姿态视频已开始驱动" });
+    showHeldDiagnostic("姿态视频已开始驱动粒子人体，可切到姿态模型观看舞动骨架", 9000);
+    window.setTimeout(() => ui.setImportProgress({ active: false }), 900);
+  } catch (error) {
+    console.error(error);
+    ui.setImportProgress({ active: true, value: 1, label: "加载失败，请重新导入", error: true });
+    showHeldDiagnostic(`姿态视频加载失败，请重新导入：${error?.message ?? "unknown error"}`, 12000);
+  } finally {
+    poseVideoInput.value = "";
   }
 });
 
@@ -952,6 +1058,143 @@ async function initCameraTracking() {
   }
 }
 
+async function startPoseVideo(file) {
+  stopPoseVideo();
+  ui.setImportProgress({ active: true, value: 0.16, label: "正在加载 Pose 模型" });
+  poseTracker = await createPoseTracker();
+  state.poseOptions = ui.getPoseOptions();
+  setPosePoints(particles, createFallbackPosePointCloud(currentPoseSampleTarget()), currentVisibleParticleCount("pose"));
+  poseVideoElement = document.createElement("video");
+  poseVideoElement.muted = true;
+  poseVideoElement.loop = true;
+  poseVideoElement.playsInline = true;
+  poseVideoElement.preload = "auto";
+  poseVideoElement.src = URL.createObjectURL(file);
+  poseVideoElement.style.display = "none";
+  document.body.appendChild(poseVideoElement);
+
+  await waitForVideoMetadata(poseVideoElement);
+  ui.setImportProgress({ active: true, value: 0.36, label: "正在启动姿态视频" });
+  await poseVideoElement.play();
+  state.poseVideoActive = true;
+  state.poseLastFrameAt = 0;
+  state.poseResultFrames = 0;
+  state.poseVideoFrames = 0;
+  schedulePoseVideoFrame();
+}
+
+function stopPoseVideo() {
+  state.poseVideoActive = false;
+  state.poseProcessingVideo = false;
+  if (poseFrameTimer) {
+    window.clearTimeout(poseFrameTimer);
+    poseFrameTimer = 0;
+  }
+  if (poseVideoElement) {
+    poseVideoElement.pause();
+    if (poseVideoElement.src) URL.revokeObjectURL(poseVideoElement.src);
+    poseVideoElement.remove();
+    poseVideoElement = null;
+  }
+}
+
+async function createPoseTracker() {
+  if (poseTracker) return poseTracker;
+  const poseModule = await import("@mediapipe/pose");
+  const Pose = resolvePoseConstructor(poseModule);
+  const tracker = new Pose({
+    locateFile: (file) => `${MP_POSE_ASSET_BASE}${file}`,
+  });
+  tracker.setOptions({
+    modelComplexity: qualityProfile.modelComplexity > 0 ? 1 : 0,
+    smoothLandmarks: true,
+    enableSegmentation: false,
+    minDetectionConfidence: 0.42,
+    minTrackingConfidence: 0.42,
+    selfieMode: false,
+  });
+  tracker.onResults((results) => {
+    const points = createPosePointCloud(results.poseLandmarks, currentPoseSampleTarget());
+    if (!points.length) return;
+    setPosePoints(particles, points, currentVisibleParticleCount("pose"));
+    state.poseLastFrameAt = performance.now();
+    state.poseResultFrames += 1;
+    if (state.model === "pose") {
+      syncParticleDrawRange();
+      syncParticleBrightnessUniforms();
+    }
+  });
+  if (typeof tracker.initialize === "function") {
+    await tracker.initialize();
+  }
+  poseTracker = tracker;
+  return poseTracker;
+}
+
+function schedulePoseVideoFrame() {
+  if (!state.poseVideoActive || !poseTracker || !poseVideoElement) return;
+  if (poseFrameTimer) return;
+  poseFrameTimer = window.setTimeout(() => {
+    poseFrameTimer = 0;
+    processPoseVideoFrame();
+  }, currentPoseFrameInterval());
+}
+
+async function processPoseVideoFrame() {
+  if (!state.poseVideoActive || !poseTracker || !poseVideoElement) return;
+  if (state.model !== "pose") {
+    schedulePoseVideoFrame();
+    return;
+  }
+  if (state.poseProcessingVideo) {
+    schedulePoseVideoFrame();
+    return;
+  }
+  if (poseVideoElement.readyState >= 2 && !poseVideoElement.paused) {
+    state.poseProcessingVideo = true;
+    try {
+      await poseTracker.send({ image: poseVideoElement });
+      state.poseVideoFrames += 1;
+      const age = performance.now() - (state.poseLastFrameAt || 0);
+      ui.setImportProgress({
+        active: age > 900,
+        value: 0.62,
+        label: age > 900 ? "正在寻找人体姿态" : `姿态视频驱动中 ${state.poseResultFrames} 帧`,
+        indeterminate: true,
+      });
+    } catch (error) {
+      console.warn(error);
+      showHeldDiagnostic(`姿态识别暂时不可用：${error?.message ?? "unknown error"}`, 6000);
+    } finally {
+      state.poseProcessingVideo = false;
+    }
+  }
+  schedulePoseVideoFrame();
+}
+
+function waitForVideoMetadata(videoElement) {
+  return new Promise((resolve, reject) => {
+    if (videoElement.readyState >= 1) {
+      resolve();
+      return;
+    }
+    const cleanup = () => {
+      videoElement.removeEventListener("loadedmetadata", handleLoaded);
+      videoElement.removeEventListener("error", handleError);
+    };
+    const handleLoaded = () => {
+      cleanup();
+      resolve();
+    };
+    const handleError = () => {
+      cleanup();
+      reject(new Error("video metadata unavailable"));
+    };
+    videoElement.addEventListener("loadedmetadata", handleLoaded, { once: true });
+    videoElement.addEventListener("error", handleError, { once: true });
+  });
+}
+
 function resolveHandsConstructor(module) {
   const globalScope = typeof globalThis !== "undefined" ? globalThis : undefined;
   const candidates = [
@@ -967,6 +1210,278 @@ function resolveHandsConstructor(module) {
     throw new Error("MediaPipe Hands 模块导出不可用");
   }
   return Hands;
+}
+
+function resolvePoseConstructor(module) {
+  const globalScope = typeof globalThis !== "undefined" ? globalThis : undefined;
+  const candidates = [module?.Pose, module?.default?.Pose, module?.default, module?.t?.Pose, module?.["module.exports"]?.Pose, globalScope?.Pose];
+  const Pose = candidates.find((candidate) => typeof candidate === "function");
+  if (!Pose) {
+    throw new Error("MediaPipe Pose 模块导出不可用");
+  }
+  return Pose;
+}
+
+function createPosePointCloud(landmarks, targetCount) {
+  if (!Array.isArray(landmarks) || landmarks.length < 17) return [];
+  const visible = landmarks
+    .map((landmark, id) => ({ landmark, id, visibility: poseVisibility(landmark) }))
+    .filter((item) => item.visibility >= 0.22);
+  if (visible.length < 6) return [];
+
+  const bounds = poseBounds(visible);
+  const bodySize = Math.max(bounds.width, bounds.height, 0.18);
+  const centerX = (bounds.minX + bounds.maxX) * 0.5;
+  const centerY = (bounds.minY + bounds.maxY) * 0.5;
+  const centerZ = averagePoseZ(visible);
+  const scale = THREE.MathUtils.clamp(2.86 / bodySize, 2.0, 5.8);
+  const themeColors = posePaletteColors();
+  const points = [];
+  const connections = [];
+
+  for (const [fromId, toId] of POSE_CONNECTIONS_LOCAL) {
+    const from = projectPoseLandmark(landmarks[fromId], fromId, centerX, centerY, centerZ, scale);
+    const to = projectPoseLandmark(landmarks[toId], toId, centerX, centerY, centerZ, scale);
+    if (!from || !to) continue;
+    const length = Math.hypot(from.x - to.x, from.y - to.y, from.z - to.z);
+    if (length <= 0.002) continue;
+    connections.push({ from, to, length, side: poseConnectionSide(fromId, toId) });
+  }
+
+  if (!connections.length) return [];
+  const totalLength = connections.reduce((sum, connection) => sum + connection.length, 0);
+  const lineTarget = Math.max(2600, Math.round(targetCount * 0.66));
+  for (let connectionIndex = 0; connectionIndex < connections.length; connectionIndex += 1) {
+    const connection = connections[connectionIndex];
+    const count = Math.max(28, Math.round((connection.length / totalLength) * lineTarget));
+    appendPoseLimbPoints(points, connection, count, themeColors, connectionIndex);
+  }
+
+  const jointTarget = Math.max(1400, Math.round(targetCount * 0.22));
+  for (let i = 0; i < POSE_DETAIL_NODE_IDS.length; i += 1) {
+    const id = POSE_DETAIL_NODE_IDS[i];
+    const point = projectPoseLandmark(landmarks[id], id, centerX, centerY, centerZ, scale);
+    if (!point) continue;
+    const isCore = POSE_CORE_IDS.has(id);
+    const isEndpoint = id >= 15 || id === 0;
+    const count = Math.round(jointTarget * (isCore ? 0.074 : isEndpoint ? 0.055 : 0.042));
+    appendPoseJointPoints(points, point, Math.max(24, count), themeColors, i);
+  }
+
+  const auraRatio = THREE.MathUtils.clamp(state.poseOptions?.aura ?? 1, 0, 1.8);
+  appendPoseAuraPoints(points, landmarks, centerX, centerY, centerZ, scale, themeColors, Math.round(Math.max(180, targetCount * 0.08) * auraRatio));
+
+  while (points.length < targetCount) {
+    const source = points[Math.floor(hash01(points.length * 9.17) * points.length)] ?? points[0];
+    points.push({
+      ...source,
+      x: source.x + (hash01(points.length * 2.31) - 0.5) * 0.012,
+      y: source.y + (hash01(points.length * 3.93) - 0.5) * 0.012,
+      z: source.z + (hash01(points.length * 5.29) - 0.5) * 0.014,
+      glow: Math.min(1.42, (source.glow ?? 0.9) * 0.96),
+    });
+  }
+  if (points.length > targetCount) {
+    points.length = targetCount;
+  }
+  return points;
+}
+
+function createFallbackPosePointCloud(targetCount) {
+  const fallbackLandmarks = [];
+  const coords = {
+    0: [0.5, 0.14, -0.05],
+    11: [0.4, 0.32, 0],
+    12: [0.6, 0.32, 0],
+    13: [0.31, 0.48, 0.02],
+    14: [0.69, 0.48, 0.02],
+    15: [0.26, 0.64, 0.04],
+    16: [0.74, 0.64, 0.04],
+    17: [0.24, 0.66, 0.04],
+    18: [0.76, 0.66, 0.04],
+    19: [0.25, 0.68, 0.04],
+    20: [0.75, 0.68, 0.04],
+    21: [0.27, 0.66, 0.04],
+    22: [0.73, 0.66, 0.04],
+    23: [0.43, 0.58, 0],
+    24: [0.57, 0.58, 0],
+    25: [0.38, 0.79, 0.02],
+    26: [0.62, 0.79, 0.02],
+    27: [0.34, 0.96, 0.05],
+    28: [0.66, 0.96, 0.05],
+    29: [0.33, 0.99, 0.05],
+    30: [0.67, 0.99, 0.05],
+    31: [0.38, 1, 0.05],
+    32: [0.62, 1, 0.05],
+  };
+  for (let id = 0; id <= 32; id += 1) {
+    const [x = 0.5, y = 0.5, z = 0] = coords[id] ?? [];
+    fallbackLandmarks[id] = { x, y, z, visibility: coords[id] ? 0.9 : 0.08 };
+  }
+  return createPosePointCloud(fallbackLandmarks, targetCount);
+}
+
+function poseVisibility(landmark) {
+  if (!landmark) return 0;
+  return landmark.visibility === undefined ? 1 : THREE.MathUtils.clamp(Number(landmark.visibility) || 0, 0, 1);
+}
+
+function poseBounds(visible) {
+  let minX = 1;
+  let minY = 1;
+  let maxX = 0;
+  let maxY = 0;
+  for (const { landmark } of visible) {
+    minX = Math.min(minX, landmark.x);
+    minY = Math.min(minY, landmark.y);
+    maxX = Math.max(maxX, landmark.x);
+    maxY = Math.max(maxY, landmark.y);
+  }
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    width: maxX - minX,
+    height: maxY - minY,
+  };
+}
+
+function averagePoseZ(visible) {
+  if (!visible.length) return 0;
+  return visible.reduce((sum, item) => sum + (Number(item.landmark.z) || 0), 0) / visible.length;
+}
+
+function projectPoseLandmark(landmark, id, centerX, centerY, centerZ, scale) {
+  const visibility = poseVisibility(landmark);
+  if (visibility < 0.22) return null;
+  return {
+    id,
+    x: (landmark.x - centerX) * scale,
+    y: -(landmark.y - centerY) * scale + 0.05,
+    z: THREE.MathUtils.clamp(((Number(landmark.z) || 0) - centerZ) * scale * 0.46, -0.72, 0.72),
+    visibility,
+  };
+}
+
+function appendPoseLimbPoints(points, connection, count, colors, seedOffset) {
+  const { from, to, side } = connection;
+  const color = poseSideColor(side, colors);
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const dz = to.z - from.z;
+  const length2d = Math.hypot(dx, dy) || 1;
+  const nx = -dy / length2d;
+  const ny = dx / length2d;
+  const visibility = Math.min(from.visibility, to.visibility);
+  const limbThickness = THREE.MathUtils.clamp(0.012 + connection.length * 0.012, 0.012, 0.045);
+
+  for (let i = 0; i < count; i += 1) {
+    const raw = (i + hash01((i + 1) * 3.17 + seedOffset * 19.3) * 0.72) / Math.max(1, count - 1);
+    const t = THREE.MathUtils.clamp(raw, 0, 1);
+    const ribbon = Math.sin(t * Math.PI) * limbThickness;
+    const sideJitter = (hash01((i + 1) * 7.13 + seedOffset * 11.7) - 0.5) * ribbon * 2.2;
+    const depthJitter = (hash01((i + 1) * 5.31 + seedOffset * 4.9) - 0.5) * limbThickness * 1.35;
+    const luma = 0.78 + Math.sin(t * Math.PI) * 0.28 + hash01((i + 1) * 2.77 + seedOffset) * 0.08;
+    points.push({
+      x: from.x + dx * t + nx * sideJitter,
+      y: from.y + dy * t + ny * sideJitter,
+      z: from.z + dz * t + depthJitter,
+      r: color.r,
+      g: color.g,
+      b: color.b,
+      a: THREE.MathUtils.clamp(0.72 + visibility * 0.32, 0.45, 1),
+      mix: color.mix,
+      glow: luma,
+      jitter: 0.0015 + limbThickness * 0.032,
+      kind: side === "core" ? 1 : 0,
+    });
+  }
+}
+
+function appendPoseJointPoints(points, point, count, colors, seedOffset) {
+  const color = poseSideColor(posePointSide(point.id), colors);
+  const isCore = POSE_CORE_IDS.has(point.id);
+  const radius = isCore ? 0.058 : point.id === 0 ? 0.052 : 0.042;
+  for (let i = 0; i < count; i += 1) {
+    const angle = hash01((i + 1) * 12.91 + seedOffset * 5.7) * Math.PI * 2;
+    const ring = Math.sqrt(hash01((i + 1) * 8.37 + seedOffset * 2.3)) * radius;
+    const lift = (hash01((i + 1) * 3.61 + seedOffset * 17.1) - 0.5) * radius * 0.74;
+    points.push({
+      x: point.x + Math.cos(angle) * ring,
+      y: point.y + Math.sin(angle) * ring,
+      z: point.z + lift,
+      r: color.r,
+      g: color.g,
+      b: color.b,
+      a: THREE.MathUtils.clamp(0.72 + point.visibility * 0.34, 0.48, 1),
+      mix: color.mix,
+      glow: 0.98 + hash01((i + 1) * 2.19 + seedOffset) * 0.36,
+      jitter: 0.0012,
+      kind: 2,
+    });
+  }
+}
+
+function appendPoseAuraPoints(points, landmarks, centerX, centerY, centerZ, scale, colors, count) {
+  const ids = [0, 15, 16, 27, 28, 31, 32];
+  const projected = ids.map((id) => projectPoseLandmark(landmarks[id], id, centerX, centerY, centerZ, scale)).filter(Boolean);
+  if (!projected.length) return;
+  for (let i = 0; i < count; i += 1) {
+    const base = projected[Math.floor(hash01(i * 4.73) * projected.length)] ?? projected[0];
+    const color = poseSideColor(posePointSide(base.id), colors);
+    const angle = hash01(i * 9.41 + 0.27) * Math.PI * 2;
+    const radius = 0.075 + hash01(i * 7.17 + 0.4) * 0.22;
+    const vertical = (hash01(i * 3.11 + 0.8) - 0.5) * 0.18;
+    points.push({
+      x: base.x + Math.cos(angle) * radius,
+      y: base.y + Math.sin(angle) * radius * 0.72 + vertical,
+      z: base.z + (hash01(i * 6.91 + 0.12) - 0.5) * 0.28,
+      r: Math.min(1, color.r * 1.08 + 0.05),
+      g: Math.min(1, color.g * 1.08 + 0.05),
+      b: Math.min(1, color.b * 1.08 + 0.05),
+      a: 0.34 + hash01(i * 2.47) * 0.36,
+      mix: color.mix,
+      glow: 0.5 + hash01(i * 5.41) * 0.34,
+      jitter: 0.003,
+      kind: 0,
+    });
+  }
+}
+
+function posePaletteColors() {
+  const primary = new THREE.Color(state.theme?.primary ?? "#ff4f8f");
+  const accent = new THREE.Color(state.theme?.accent ?? "#49e6ff");
+  const rim = new THREE.Color(state.theme?.rim ?? "#fff4c2");
+  return {
+    left: accent.clone().lerp(rim, 0.14),
+    right: primary.clone().lerp(rim, 0.18),
+    core: primary.clone().lerp(accent, 0.52).lerp(rim, 0.1),
+    rim,
+  };
+}
+
+function poseSideColor(side, colors) {
+  const color = side === "left" ? colors.left : side === "right" ? colors.right : colors.core;
+  const total = color.r + color.g + color.b + 0.001;
+  return {
+    r: color.r,
+    g: color.g,
+    b: color.b,
+    mix: THREE.MathUtils.clamp((color.g * 0.45 + color.b * 0.65) / total, 0, 1),
+  };
+}
+
+function poseConnectionSide(fromId, toId) {
+  const fromSide = posePointSide(fromId);
+  const toSide = posePointSide(toId);
+  return fromSide === toSide ? fromSide : "core";
+}
+
+function posePointSide(id) {
+  if (POSE_LEFT_IDS.has(id)) return "left";
+  if (POSE_RIGHT_IDS.has(id)) return "right";
+  return "core";
 }
 
 function animate() {
@@ -1356,6 +1871,9 @@ function resolveShowModel(model) {
   if (model === "mesh" && !particles.customMeshPoints?.length) {
     return "saturn";
   }
+  if (model === "pose" && !particles.customPosePoints?.length) {
+    return "heart";
+  }
   return model;
 }
 
@@ -1712,6 +2230,7 @@ function modelLabel(model) {
   if (model === "cake") return "生日蛋糕";
   if (model === "balloons") return "气球";
   if (model === "text") return "文字";
+  if (model === "pose") return "姿态";
   if (model === "image") return "图片";
   if (model === "mesh") return "3D";
   return "爱心";
@@ -1766,6 +2285,13 @@ function particlePaletteForModel(model, currentState) {
     };
   }
 
+  if (model === "pose") {
+    return {
+      primary: "#49e6ff",
+      accent: currentState.theme?.primary ?? "#ff4f8f",
+    };
+  }
+
   return {
     primary: `#${currentState.color.getHexString()}`,
     accent: `#${currentState.accent.getHexString()}`,
@@ -1785,6 +2311,11 @@ function selectModel(model, forceRefresh = false) {
     meshFileInput?.click();
     return;
   }
+  if (normalized === "pose" && !particles.customPosePoints?.length) {
+    showHeldDiagnostic("请先上传舞蹈/人物视频，导入后会自动切换到姿态粒子", 7000);
+    poseVideoInput?.click();
+    return;
+  }
   if (!forceRefresh && state.model === normalized) return;
 
   state.model = normalized;
@@ -1801,8 +2332,10 @@ function selectModel(model, forceRefresh = false) {
     textInput.value = state.customText;
     particles.customText = state.customText;
     setCustomText(particles, state.customText, state.textFont);
+  } else if (normalized === "mesh" && meshBasePoints.length) {
+    setMeshPoints(particles, transformMeshPoints(meshBasePoints, state.meshOptions));
   } else {
-    setParticleTargets(particles, normalized);
+    setParticleTargets(particles, normalized, normalized === "pose" ? { writeCount: currentVisibleParticleCount("pose") } : undefined);
   }
 
   syncParticlePalette();
@@ -1813,7 +2346,7 @@ function selectModel(model, forceRefresh = false) {
 function syncParticleBrightnessUniforms() {
   particles.material.uniforms.uModelBrightness.value = THREE.MathUtils.clamp(state.modelBrightness ?? 1, 0.35, 2.4);
   particles.material.uniforms.uImageBrightness.value =
-    state.model === "image" ? THREE.MathUtils.clamp(state.imageBrightness ?? 2.8, 0.45, 5.2) : 1;
+    state.model === "image" || state.model === "pose" ? THREE.MathUtils.clamp(state.imageBrightness ?? 2.8, 0.45, 5.2) : 1;
 }
 
 function syncParticleDrawRange() {
@@ -1822,13 +2355,58 @@ function syncParticleDrawRange() {
   ui.updateImageSizeLabel(state.model === "image" ? visibleCount : null);
 }
 
-function currentVisibleParticleCount() {
-  if (state.model !== "image") {
-    return particles.count;
+function currentVisibleParticleCount(model = state.model) {
+  if (model === "mesh") {
+    const density = THREE.MathUtils.clamp(state.meshOptions?.density ?? 1, 0.25, 1.2);
+    return Math.min(particles.count, Math.max(26000, Math.round(particles.count * Math.min(1, density))));
   }
-  const size = THREE.MathUtils.clamp(state.imageSize ?? 1, 0.45, 1);
-  const density = THREE.MathUtils.clamp(size ** 1.42, 0.32, 1);
-  return Math.max(12000, Math.round(particles.count * density));
+  if (model === "pose") {
+    const density = THREE.MathUtils.clamp(state.poseOptions?.density ?? 1, 0.35, 1.6);
+    const ratio = (qualityProfile.id === "compact" ? 0.16 : qualityProfile.id === "balanced" ? 0.2 : 0.24) * density;
+    return Math.min(particles.count, Math.max(26000, Math.round(particles.count * ratio)));
+  }
+  if (model === "image") {
+    const size = THREE.MathUtils.clamp(state.imageSize ?? 1, 0.45, 1);
+    const density = THREE.MathUtils.clamp(size ** 1.42, 0.32, 1);
+    return Math.max(12000, Math.round(particles.count * density));
+  }
+  return particles.count;
+}
+
+function currentPoseSampleTarget() {
+  const density = THREE.MathUtils.clamp(state.poseOptions?.density ?? 1, 0.35, 1.6);
+  const base = Math.max(5000, Math.round((qualityProfile.poseSampleCount ?? qualityProfile.particleCount * 0.025) / 100) * 100);
+  return Math.min(26000, Math.max(4200, Math.round((base * density) / 100) * 100));
+}
+
+function currentPoseFrameInterval() {
+  const follow = THREE.MathUtils.clamp(state.poseOptions?.follow ?? 1, 0.45, 1.8);
+  return Math.round(THREE.MathUtils.clamp(POSE_FRAME_INTERVAL_MS / follow, 44, 180));
+}
+
+function scheduleMeshOptionsUpdate() {
+  if (!meshBasePoints.length || state.model !== "mesh") return;
+  if (meshOptionsFrame) return;
+  meshOptionsFrame = requestAnimationFrame(() => {
+    meshOptionsFrame = 0;
+    setMeshPoints(particles, transformMeshPoints(meshBasePoints, state.meshOptions));
+    syncParticleDrawRange();
+    syncParticleBrightnessUniforms();
+  });
+}
+
+function transformMeshPoints(points, options = {}) {
+  if (!Array.isArray(points) || points.length === 0) return points;
+  const size = THREE.MathUtils.clamp(options.size ?? 1, 0.25, 2.6);
+  const depth = THREE.MathUtils.clamp(options.depth ?? 1, 0.2, 2.4);
+  const spread = THREE.MathUtils.clamp(options.spread ?? 1, 0, 2);
+  return points.map((point) => ({
+    ...point,
+    x: (point.baseX ?? point.x) * size,
+    y: (point.baseY ?? point.y) * size,
+    z: (point.baseZ ?? point.z ?? 0) * size * depth,
+    jitter: (point.baseJitter ?? 0.004) * spread,
+  }));
 }
 
 function triggerFireworksBurst() {
@@ -2719,17 +3297,22 @@ async function createMeshPointCloud(file, targetCount, onProgress) {
         .multiplyScalar(normalizer);
       const sampledColor = sampleTriangleColor(triangle, u, v, w);
       const colorTotal = sampledColor.r + sampledColor.g + sampledColor.b + 0.001;
+      const baseJitter = 0.004;
       points.push({
         x: point.x,
         y: point.y,
         z: point.z,
+        baseX: point.x,
+        baseY: point.y,
+        baseZ: point.z,
         r: sampledColor.r,
         g: sampledColor.g,
         b: sampledColor.b,
         a: 1,
         mix: THREE.MathUtils.clamp((sampledColor.g * 0.45 + sampledColor.b * 0.65) / colorTotal, 0, 1),
         glow: 0.54 + hash01(i * 5.91) * 0.28,
-        jitter: 0.004,
+        jitter: baseJitter,
+        baseJitter,
       });
       if (i > 0 && i % 18000 === 0) {
         onProgress?.({ value: 0.72 + Math.min(0.18, (i / sampleCount) * 0.18), label: "正在采样模型表面" });
