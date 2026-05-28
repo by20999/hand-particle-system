@@ -41,6 +41,22 @@ const FIREWORK_CENTERS = [
   { x: 0.02, y: 0.28, z: 0.08, launchX: 0.04, launchZ: -0.18, scale: 0.58, hue: 0.9, depth: 0.78, tilt: 2.1 },
 ];
 
+const CAKE_CANDLES = [
+  { x: -0.42, z: -0.02, hue: 0.04 },
+  { x: -0.2, z: 0.16, hue: 0.58 },
+  { x: 0.02, z: -0.08, hue: 0.84 },
+  { x: 0.24, z: 0.14, hue: 0.18 },
+  { x: 0.46, z: -0.03, hue: 0.42 },
+];
+
+const BALLOON_CLUSTER = [
+  { x: -0.92, y: 0.26, z: 0.03, scale: 0.5, mix: 0.04 },
+  { x: -0.45, y: 0.58, z: -0.16, scale: 0.56, mix: 0.18 },
+  { x: 0.0, y: 0.34, z: 0.1, scale: 0.62, mix: 0.36 },
+  { x: 0.48, y: 0.62, z: -0.1, scale: 0.54, mix: 0.66 },
+  { x: 0.92, y: 0.28, z: 0.08, scale: 0.5, mix: 0.86 },
+];
+
 export const TEXT_FONT_PRESETS = [
   {
     id: "modern",
@@ -153,6 +169,9 @@ export function writeShapeTargets(model, buffers) {
     flower: rosePoint,
     saturn: saturnPoint,
     fireworks: fireworksPoint,
+    ring: ringPoint,
+    cake: cakePoint,
+    balloons: balloonsPoint,
   };
   const generator = generators[model] ?? heartPoint;
   const {
@@ -481,6 +500,212 @@ function heartCurvePoint(angle) {
 function heart2DField(x, y) {
   const a = x * x + y * y - 1;
   return a * a * a - x * x * y * y * y;
+}
+
+function ringPoint(t, r, i) {
+  const type = hash(i * 0.41);
+  if (type < 0.7) {
+    const angle = TAU * hash(i * 5.17);
+    const tube = TAU * hash(i * 9.83);
+    const major = 0.82 + Math.sin(angle * 2.0) * 0.025;
+    const minor = 0.075 + hash(i * 4.1) * 0.038;
+    const rim = major + Math.cos(tube) * minor;
+    const yOval = 0.68;
+    const tilt = -0.16;
+    const rawY = Math.sin(angle) * yOval + Math.sin(tube) * minor * 0.44 - 0.18;
+    const rawZ = Math.sin(tube) * minor * 0.95 + Math.sin(angle) * 0.08;
+    return {
+      x: Math.cos(angle) * rim,
+      y: rawY * Math.cos(tilt) - rawZ * Math.sin(tilt),
+      z: rawY * Math.sin(tilt) + rawZ * Math.cos(tilt),
+      mix: 0.58 + hash(i * 1.91) * 0.2,
+      glow: 0.58 + Math.max(0, Math.cos(tube)) * 0.1,
+      kind: 0,
+      dirX: Math.cos(angle) * 0.96,
+      dirY: Math.sin(angle) * 0.72,
+      dirZ: rawZ,
+    };
+  }
+
+  if (type < 0.84) {
+    const facet = Math.floor(hash(i * 2.91) * 8);
+    const u = hash(i * 3.83) ** 0.58;
+    const v = (hash(i * 6.27) - 0.5) * 2;
+    const angle = (facet / 8) * TAU + v * 0.18;
+    const crown = type < 0.68;
+    const radius = (crown ? 0.22 : 0.14) * (1 - u * 0.32) * (0.72 + Math.abs(v) * 0.28);
+    const y = 0.42 + u * (crown ? 0.34 : -0.2) + Math.abs(v) * 0.03;
+    return {
+      x: Math.cos(angle) * radius,
+      y,
+      z: Math.sin(angle) * radius * 0.72,
+      mix: 0.08 + hash(i * 1.7) * 0.16,
+      glow: 0.5 + (1 - u) * 0.16,
+      kind: 1,
+      dirX: Math.cos(angle) * (0.28 + u * 0.42),
+      dirY: 0.42 + u * 0.3,
+      dirZ: Math.sin(angle) * 0.36,
+    };
+  }
+
+  const sparkleAngle = TAU * hash(i * 3.17);
+  const radius = 0.42 + hash(i * 4.31) * 0.72;
+  const height = 0.1 + hash(i * 7.61) * 0.72;
+  return {
+    x: Math.cos(sparkleAngle) * radius,
+    y: 0.18 + height,
+    z: Math.sin(sparkleAngle) * radius * 0.5 + (hash(i * 9.9) - 0.5) * 0.18,
+    mix: 0.12 + hash(i * 5.4) * 0.12,
+    glow: 0.32 + hash(i * 8.1) * 0.42,
+    kind: 2,
+    dirX: Math.cos(sparkleAngle) * 0.75,
+    dirY: 0.68 + hash(i * 2.8) * 0.42,
+    dirZ: Math.sin(sparkleAngle) * 0.55,
+  };
+}
+
+function cakePoint(t, r, i) {
+  const type = hash(i * 0.57);
+  if (type < 0.5) {
+    const layer = Math.floor(hash(i * 2.11) * 3);
+    const yBase = [-0.62, -0.26, 0.06][layer];
+    const height = [0.32, 0.28, 0.24][layer];
+    const radiusX = [1.08, 0.86, 0.64][layer];
+    const radiusZ = [0.48, 0.39, 0.31][layer];
+    const angle = TAU * hash(i * 4.61);
+    const radius = Math.sqrt(hash(i * 3.83));
+    const side = smoothstep(0.62, 1, radius);
+    const sprinkle = hash(i * 12.9) > 0.94;
+    return {
+      x: Math.cos(angle) * radiusX * radius,
+      y: yBase + hash(i * 5.37) * height + Math.sin(angle * 7 + layer) * side * 0.018,
+      z: Math.sin(angle) * radiusZ * radius,
+      mix: sprinkle ? hash(i * 6.4) : 0.14 + layer * 0.08 + hash(i * 1.7) * 0.12,
+      glow: sprinkle ? 1.08 : 0.52 + side * 0.14,
+      kind: sprinkle ? 2 : 0,
+    };
+  }
+
+  if (type < 0.62) {
+    const layer = Math.floor(hash(i * 2.61) * 3);
+    const angle = TAU * hash(i * 4.91);
+    const radiusX = [1.1, 0.88, 0.66][layer];
+    const radiusZ = [0.5, 0.41, 0.33][layer];
+    const y = [-0.28, 0.04, 0.3][layer] + Math.sin(angle * 8 + layer) * 0.035;
+    const drip = hash(i * 7.2) > 0.72 ? hash(i * 9.1) * 0.18 : 0;
+    return {
+      x: Math.cos(angle) * radiusX * (0.96 + hash(i * 3.2) * 0.06),
+      y: y - drip,
+      z: Math.sin(angle) * radiusZ * (0.96 + hash(i * 5.2) * 0.06),
+      mix: 0.05 + hash(i * 1.9) * 0.08,
+      glow: 0.58 + drip * 0.32,
+      kind: 1,
+      dirX: Math.cos(angle) * 0.82,
+      dirY: -0.08 - drip,
+      dirZ: Math.sin(angle) * 0.42,
+    };
+  }
+
+  if (type < 0.78) {
+    const candle = CAKE_CANDLES[Math.floor(hash(i * 1.13) * CAKE_CANDLES.length)] ?? CAKE_CANDLES[0];
+    const angle = TAU * hash(i * 5.41);
+    const radius = 0.035 + hash(i * 7.23) * 0.02;
+    const stripe = Math.sin(hash(i * 3.7) * 16) > 0;
+    return {
+      x: candle.x + Math.cos(angle) * radius,
+      y: 0.34 + hash(i * 2.91) * 0.46,
+      z: candle.z + Math.sin(angle) * radius * 0.82,
+      mix: stripe ? candle.hue : 0.04,
+      glow: 0.54,
+      kind: 2,
+      dirX: Math.cos(angle) * 0.08,
+      dirY: 0.54,
+      dirZ: Math.sin(angle) * 0.08,
+    };
+  }
+
+  if (type < 0.87) {
+    const candle = CAKE_CANDLES[Math.floor(hash(i * 1.19) * CAKE_CANDLES.length)] ?? CAKE_CANDLES[0];
+    const angle = TAU * hash(i * 5.73);
+    const u = hash(i * 3.87) ** 0.48;
+    const radius = Math.sin(u * Math.PI) * (0.05 + hash(i * 4.2) * 0.035);
+    return {
+      x: candle.x + Math.cos(angle) * radius,
+      y: 0.82 + u * 0.32,
+      z: candle.z + Math.sin(angle) * radius * 0.55,
+      mix: 0.24 + hash(i * 7.1) * 0.12,
+      glow: 0.92 + (1 - u) * 0.2,
+      kind: 3,
+      dirX: Math.cos(angle) * 0.18,
+      dirY: 0.86,
+      dirZ: Math.sin(angle) * 0.12,
+    };
+  }
+
+  const angle = TAU * hash(i * 8.13);
+  const radius = 0.4 + hash(i * 2.43) * 1.08;
+  return {
+    x: Math.cos(angle) * radius,
+    y: -0.1 + hash(i * 6.17) * 1.36,
+    z: Math.sin(angle) * radius * 0.42,
+    mix: hash(i * 4.7),
+    glow: 0.38 + hash(i * 3.1) * 0.42,
+    kind: 4,
+    dirX: Math.cos(angle) * 0.9,
+    dirY: 0.7 + hash(i * 7.2) * 0.44,
+    dirZ: Math.sin(angle) * 0.48,
+  };
+}
+
+function balloonsPoint(t, r, i) {
+  const type = hash(i * 0.63);
+  if (type < 0.76) {
+    const balloon = BALLOON_CLUSTER[Math.floor(hash(i * 1.31) * BALLOON_CLUSTER.length)] ?? BALLOON_CLUSTER[0];
+    const p = spherePoint(hash(i * 5.17), hash(i * 7.41), i);
+    const squash = 1 + Math.max(0, p.y) * 0.22;
+    return {
+      x: balloon.x + p.x * balloon.scale * 0.7,
+      y: balloon.y + p.y * balloon.scale * squash,
+      z: balloon.z + p.z * balloon.scale * 0.48,
+      mix: balloon.mix + hash(i * 2.7) * 0.08,
+      glow: 0.68 + Math.max(0, p.y) * 0.18,
+      kind: 0,
+      dirX: p.x * 0.86,
+      dirY: p.y * 1.1,
+      dirZ: p.z * 0.54,
+    };
+  }
+
+  if (type < 0.9) {
+    const balloon = BALLOON_CLUSTER[Math.floor(hash(i * 1.71) * BALLOON_CLUSTER.length)] ?? BALLOON_CLUSTER[0];
+    const u = hash(i * 4.11);
+    const wave = Math.sin(u * Math.PI * 4 + balloon.x * 2) * 0.045;
+    return {
+      x: balloon.x * (1 - u * 0.35) + wave,
+      y: balloon.y - balloon.scale * 0.48 - u * 1.1,
+      z: balloon.z * (1 - u * 0.3) + Math.sin(u * Math.PI * 3) * 0.035,
+      mix: 0.04,
+      glow: 0.32,
+      kind: 1,
+      dirX: wave,
+      dirY: -0.72,
+      dirZ: 0,
+    };
+  }
+
+  const angle = TAU * hash(i * 3.9);
+  const radius = 0.35 + hash(i * 6.3) * 1.2;
+  return {
+    x: Math.cos(angle) * radius,
+    y: -0.92 + hash(i * 5.8) * 2.16,
+    z: Math.sin(angle) * radius * 0.46,
+    mix: hash(i * 8.7),
+    glow: 0.38 + hash(i * 4.2) * 0.5,
+    kind: 2,
+    dirX: Math.cos(angle) * 0.82,
+    dirY: 0.6 + hash(i * 1.8) * 0.72,
+    dirZ: Math.sin(angle) * 0.48,
+  };
 }
 
 function rosePoint(t, r, i) {

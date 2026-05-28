@@ -39,6 +39,9 @@ import { THEMES, applyThemeToDocument, getTheme } from "./themes.js";
 import { createUI } from "./ui.js";
 import { SHOW_PRESET_LIBRARY } from "./show-presets/index.js";
 
+const POINTING_MODE_HOLD_MS = 560;
+const POINTING_EXIT_EPSILON = 0.025;
+
 const ui = createUI();
 const {
   canvas,
@@ -66,6 +69,7 @@ const {
   colorPicker,
   fullscreenBtn,
   sensitivity,
+  pointingSensitivity,
   themeButtons,
   backgroundButtons,
   backgroundSelect,
@@ -302,7 +306,7 @@ const SHOW_PRESETS = {
 ui.setShowPresetOptions(showPresetOptionList());
 
 const CUSTOM_SHOW_STORAGE_KEY = "customShowPreset";
-const SHOW_MODELS = new Set(["heart", "flower", "saturn", "fireworks", "text", "image", "mesh"]);
+const SHOW_MODELS = new Set(["heart", "flower", "saturn", "fireworks", "ring", "cake", "balloons", "text", "image", "mesh"]);
 const SHOW_BACKGROUNDS = new Set(["nebula", "stage", "minimal", "fireworks", "aurora", "lattice", "sunset"]);
 const SHOW_THEMES = new Set(THEMES.map((theme) => theme.id));
 const CAMERA_SHOTS = {
@@ -356,6 +360,7 @@ const state = {
   color: new THREE.Color(initialTheme.primary),
   accent: new THREE.Color(initialTheme.accent),
   sensitivity: ui.getSensitivity(),
+  pointingSensitivity: ui.getPointingSensitivity(),
   modelBrightness: ui.getModelBrightness(),
   imageBrightness: ui.getImageBrightness(),
   imageSize: ui.getImageSize(),
@@ -411,6 +416,13 @@ const state = {
   gestureCommand: { name: "none", pointing: false, pointX: 0, pointY: 0, pointZ: 0 },
   lastGestureCommand: "none",
   gestureCommandUntil: 0,
+  pointingModeUntil: 0,
+  pointingBlend: 0,
+  pointingRig: {
+    x: 0,
+    y: 0,
+    z: 0,
+  },
   audioLevel: 0,
   beatPulse: 0,
   audioMotion: null,
@@ -530,6 +542,12 @@ gestureToggleBtn?.addEventListener("click", () => {
     state.gestureTarget = 0;
     state.gesture = THREE.MathUtils.lerp(state.gesture, 0, 0.5);
     state.fistViewActive = false;
+    state.gestureCommand = { name: "none", pointing: false, pointX: 0, pointY: 0, pointZ: 0 };
+    state.pointingModeUntil = 0;
+    state.pointingBlend = 0;
+    state.pointingRig.x = 0;
+    state.pointingRig.y = 0;
+    state.pointingRig.z = 0;
     controls.enabled = true;
     ui.setStatus("手势控制已关闭，模型可独立律动", "idle");
     ui.setDiagnostic("摄像头预览已隐藏，手势输入暂不参与粒子控制");
@@ -816,6 +834,10 @@ sensitivity.addEventListener("input", () => {
   state.sensitivity = ui.getSensitivity();
 });
 
+pointingSensitivity?.addEventListener("input", () => {
+  state.pointingSensitivity = ui.getPointingSensitivity();
+});
+
 fullscreenBtn.addEventListener("click", async () => {
   if (!document.fullscreenElement) {
     await document.documentElement.requestFullscreen();
@@ -970,6 +992,7 @@ function animate() {
   ui.updateAudioLevel(audio);
   particles.material.uniforms.uTime.value = elapsed;
   detectHands(now);
+  updatePointingBlend(now);
   updateFireworkExplosion(now);
   updateParticles(particles, state, {
     delta,
@@ -1006,7 +1029,10 @@ function detectHands(now) {
 
   if (hands.length === 0) {
     easeGestureToFallback(now);
-    state.gestureCommand = { name: "none", pointing: false, pointX: 0, pointY: 0, pointZ: 0 };
+    if (!state.gestureCommand?.pointing || (now >= state.pointingModeUntil && state.pointingBlend <= POINTING_EXIT_EPSILON)) {
+      state.gestureCommand = { name: "none", pointing: false, pointX: 0, pointY: 0, pointZ: 0 };
+      state.lastGestureCommand = "none";
+    }
     state.handMode = "idle";
     state.fistViewActive = false;
     controls.enabled = true;
@@ -1031,15 +1057,23 @@ function detectHands(now) {
 
   state.openness = openness;
   state.handSpread = spread;
+  updateGestureCommand(hands, now);
+  const pointingMode = isPointingModeActive(now);
+  if (pointingMode) {
+    ui.setStatus("食指指向中，模型跟随移动", "ready");
+  }
   const rawGesture = hands.length >= 2 ? spread * 0.48 + openness * 0.52 : openness;
   const gestureFloor = THREE.MathUtils.clamp(0.22 - (state.sensitivity - 1) * 0.12, 0.08, 0.34);
   const gestureRange = THREE.MathUtils.clamp(0.58 - (state.sensitivity - 1) * 0.16, 0.38, 0.78);
   const responsiveGesture = THREE.MathUtils.clamp((rawGesture - gestureFloor) / gestureRange, 0, 1);
-  state.gestureTarget = THREE.MathUtils.clamp(Math.pow(responsiveGesture, 1.22), 0, 1);
-  state.handMode = state.gestureTarget > 0.62 ? "展开" : state.gestureTarget < 0.26 ? "收拢" : "半开";
-  const follow = state.gestureTarget > state.gesture ? 0.12 : 0.28;
+  const nextGestureTarget = THREE.MathUtils.clamp(Math.pow(responsiveGesture, 1.22), 0, 1);
+  state.gestureTarget = pointingMode ? 0.006 : nextGestureTarget;
+  state.handMode = pointingMode ? "指向" : state.gestureTarget > 0.62 ? "展开" : state.gestureTarget < 0.26 ? "收拢" : "半开";
+  const follow = pointingMode ? 0.78 : state.gestureTarget > state.gesture ? 0.12 : 0.28;
   state.gesture = THREE.MathUtils.lerp(state.gesture, state.gestureTarget, follow);
-  updateGestureCommand(hands, now);
+  if (pointingMode) {
+    state.smoothGesture = THREE.MathUtils.lerp(state.smoothGesture, 0, 0.62);
+  }
   updateFistViewControl(hands[0], hands.length);
   updateDiagnostics(hands.length, now);
 }
@@ -1048,30 +1082,44 @@ function updateGestureCommand(hands, now) {
   const command = classifyGestureCommand(hands);
   if (command.name !== "none") {
     if (command.pointing && state.gestureCommand?.pointing) {
-      command.pointX = THREE.MathUtils.lerp(state.gestureCommand.pointX, command.pointX, 0.36);
-      command.pointY = THREE.MathUtils.lerp(state.gestureCommand.pointY, command.pointY, 0.36);
-      command.pointZ = THREE.MathUtils.lerp(state.gestureCommand.pointZ, command.pointZ, 0.36);
+      command.pointX = THREE.MathUtils.lerp(state.gestureCommand.pointX, command.pointX, 0.54);
+      command.pointY = THREE.MathUtils.lerp(state.gestureCommand.pointY, command.pointY, 0.54);
+      command.pointZ = THREE.MathUtils.lerp(state.gestureCommand.pointZ, command.pointZ, 0.54);
     }
     state.gestureCommand = command;
     state.lastGestureCommand = command.name;
-    state.gestureCommandUntil = now + (command.pointing ? 220 : 520);
+    state.gestureCommandUntil = now + (command.pointing ? POINTING_MODE_HOLD_MS : 520);
+    if (command.pointing) {
+      state.pointingModeUntil = now + POINTING_MODE_HOLD_MS;
+    }
     return;
   }
 
   if (now < state.gestureCommandUntil && state.gestureCommand?.name !== "none") {
-    if (state.gestureCommand.pointing) {
-      state.gestureCommand = {
-        ...state.gestureCommand,
-        pointX: THREE.MathUtils.lerp(state.gestureCommand.pointX, 0, 0.08),
-        pointY: THREE.MathUtils.lerp(state.gestureCommand.pointY, 0, 0.08),
-        pointZ: THREE.MathUtils.lerp(state.gestureCommand.pointZ, 0, 0.08),
-      };
+    if (state.gestureCommand.pointing && now < state.pointingModeUntil) {
+      state.lastGestureCommand = "point";
     }
     return;
   }
 
-  state.gestureCommand = command;
+  if (!state.gestureCommand?.pointing || state.pointingBlend <= POINTING_EXIT_EPSILON) {
+    state.gestureCommand = command;
+  }
   state.lastGestureCommand = "none";
+}
+
+function isPointingModeActive(now) {
+  return Boolean(state.gestureCommand?.pointing && (now < state.pointingModeUntil || state.pointingBlend > POINTING_EXIT_EPSILON));
+}
+
+function updatePointingBlend(now) {
+  const target = state.gestureCommand?.pointing && now < state.pointingModeUntil ? 1 : 0;
+  const follow = target > state.pointingBlend ? 0.48 : 0.13;
+  state.pointingBlend = THREE.MathUtils.lerp(state.pointingBlend, target, follow);
+  if (target === 0 && state.pointingBlend <= POINTING_EXIT_EPSILON && state.gestureCommand?.pointing) {
+    state.gestureCommand = { name: "none", pointing: false, pointX: 0, pointY: 0, pointZ: 0 };
+    state.lastGestureCommand = "none";
+  }
 }
 
 async function processVideoFrame() {
@@ -1107,7 +1155,10 @@ async function processVideoFrame() {
 }
 
 function updateFistViewControl(hand, handCount) {
-  if (state.cameraTransition) {
+  if (state.cameraTransition || state.gestureCommand?.pointing || state.pointingBlend > POINTING_EXIT_EPSILON) {
+    if (state.fistViewActive) {
+      controls.enabled = true;
+    }
     state.fistViewActive = false;
     return;
   }
@@ -1657,6 +1708,9 @@ function modelLabel(model) {
   if (model === "flower") return "花朵";
   if (model === "saturn") return "土星";
   if (model === "fireworks") return "烟花";
+  if (model === "ring") return "戒指";
+  if (model === "cake") return "生日蛋糕";
+  if (model === "balloons") return "气球";
   if (model === "text") return "文字";
   if (model === "image") return "图片";
   if (model === "mesh") return "3D";
@@ -1688,6 +1742,27 @@ function particlePaletteForModel(model, currentState) {
     return {
       primary: currentState.theme?.primary ?? "#ffd166",
       accent: "#fff4c2",
+    };
+  }
+
+  if (model === "ring") {
+    return {
+      primary: "#ffd86a",
+      accent: "#eaf8ff",
+    };
+  }
+
+  if (model === "cake") {
+    return {
+      primary: "#ff7cb6",
+      accent: "#ffe9a6",
+    };
+  }
+
+  if (model === "balloons") {
+    return {
+      primary: "#ff4f8f",
+      accent: "#49e6ff",
     };
   }
 
@@ -1825,38 +1900,61 @@ function updateParticleRig(delta, elapsed, audio) {
   const orbitX = drive * Math.sin(elapsed * (1.75 + mid * 1.55)) * (0.18 + phraseLift * 0.46) * modelMotion;
   const orbitY = drive * Math.sin(elapsed * (1.95 + treble * 1.8) + 1.7) * (0.12 + phraseLift * 0.28) * modelMotion;
   const orbitZ = drive * Math.cos(elapsed * (1.38 + bass * 1.45)) * (0.1 + phraseLift * 0.28) * modelMotion;
+  const pointingPower = THREE.MathUtils.clamp(state.pointingBlend ?? 0, 0, 1);
+  const pointingGain = THREE.MathUtils.clamp(state.pointingSensitivity ?? 1.2, 0.6, 1.8);
+  const pointingX = state.gestureCommand?.pointing ? state.gestureCommand.pointX : 0;
+  const pointingY = state.gestureCommand?.pointing ? state.gestureCommand.pointY : 0;
+  const pointingZ = state.gestureCommand?.pointing ? state.gestureCommand.pointZ : 0;
+  const pointingSpeed = (3.9 + pointingGain * 1.45) * pointingPower;
+  if (pointingPower > 0.04) {
+    state.pointingRig.x = THREE.MathUtils.clamp(
+      state.pointingRig.x + pointingX * pointingSpeed * delta,
+      -4.9 * pointingGain,
+      4.9 * pointingGain,
+    );
+    state.pointingRig.y = THREE.MathUtils.clamp(
+      state.pointingRig.y + pointingY * pointingSpeed * 0.72 * delta,
+      -2.75 * pointingGain,
+      2.75 * pointingGain,
+    );
+    state.pointingRig.z = THREE.MathUtils.clamp(
+      state.pointingRig.z + pointingZ * pointingSpeed * 0.48 * delta,
+      -1.35 * pointingGain,
+      1.35 * pointingGain,
+    );
+  } else {
+    state.pointingRig.x = THREE.MathUtils.lerp(state.pointingRig.x, 0, 0.035);
+    state.pointingRig.y = THREE.MathUtils.lerp(state.pointingRig.y, 0, 0.035);
+    state.pointingRig.z = THREE.MathUtils.lerp(state.pointingRig.z, 0, 0.035);
+  }
+  const musicMix = 1 - pointingPower * 0.9;
   const targetX =
-    state.audioRig.anchorX +
-    orbitX +
-    state.audioRig.impactX +
-    (state.gestureCommand?.pointing ? state.gestureCommand.pointX * 1.4 : 0);
+    (state.audioRig.anchorX + orbitX + state.audioRig.impactX) * musicMix +
+    state.pointingRig.x;
   const targetY =
-    state.audioRig.anchorY +
-    orbitY +
-    kick * 0.28 * modelMotion +
-    state.audioRig.impactY +
-    (state.gestureCommand?.pointing ? state.gestureCommand.pointY * 0.95 : 0);
+    (state.audioRig.anchorY + orbitY + kick * 0.28 * modelMotion + state.audioRig.impactY) * musicMix +
+    state.pointingRig.y;
   const targetZ =
-    state.audioRig.anchorZ +
-    orbitZ +
-    state.audioRig.impactZ +
-    (state.gestureCommand?.pointing ? state.gestureCommand.pointZ * 0.75 : 0);
+    (state.audioRig.anchorZ + orbitZ + state.audioRig.impactZ) * musicMix +
+    state.pointingRig.z;
   const targetTiltX =
     drive * Math.sin(elapsed * 1.75 + bass * 3.1) * phraseLift * 0.46 + state.audioRig.impactTiltX - targetZ * 0.16;
   const targetTiltZ =
     drive * Math.sin(elapsed * 2.1 + treble * 4.4) * (0.12 + phraseLift * 0.48) +
     state.audioRig.impactTiltZ -
     targetX * 0.18;
-  const targetYaw = enabled ? Math.atan2(targetX - state.audioRig.x, 1.6 + targetZ - state.audioRig.z) * 1.35 : 0;
+  const targetYaw =
+    enabled || pointingPower > 0.04 ? Math.atan2(targetX - state.audioRig.x, 1.6 + targetZ - state.audioRig.z) * (enabled ? 1.35 : 0.82) : 0;
   const follow = enabled ? THREE.MathUtils.clamp(0.12 + impact * 0.26 + kick * 0.1 + onset * 0.08, 0.12, 0.46) : 0.09;
+  const positionFollow = Math.max(follow, pointingPower > 0.04 ? 0.18 + pointingPower * 0.18 : follow);
 
   state.audioRig.scale = THREE.MathUtils.lerp(state.audioRig.scale, targetScale, follow);
-  state.audioRig.x = THREE.MathUtils.lerp(state.audioRig.x, targetX, follow);
-  state.audioRig.y = THREE.MathUtils.lerp(state.audioRig.y, targetY, follow);
-  state.audioRig.z = THREE.MathUtils.lerp(state.audioRig.z, targetZ, follow);
-  state.audioRig.tiltX = THREE.MathUtils.lerp(state.audioRig.tiltX, targetTiltX, follow);
-  state.audioRig.tiltZ = THREE.MathUtils.lerp(state.audioRig.tiltZ, targetTiltZ, follow);
-  state.audioRig.yaw = THREE.MathUtils.lerp(state.audioRig.yaw, targetYaw, follow);
+  state.audioRig.x = THREE.MathUtils.lerp(state.audioRig.x, targetX, positionFollow);
+  state.audioRig.y = THREE.MathUtils.lerp(state.audioRig.y, targetY, positionFollow);
+  state.audioRig.z = THREE.MathUtils.lerp(state.audioRig.z, targetZ, positionFollow);
+  state.audioRig.tiltX = THREE.MathUtils.lerp(state.audioRig.tiltX, targetTiltX, positionFollow);
+  state.audioRig.tiltZ = THREE.MathUtils.lerp(state.audioRig.tiltZ, targetTiltZ, positionFollow);
+  state.audioRig.yaw = THREE.MathUtils.lerp(state.audioRig.yaw, targetYaw, positionFollow);
 
   particles.system.scale.setScalar(state.audioRig.scale);
   particles.system.position.set(state.audioRig.x, state.audioRig.y, state.audioRig.z);

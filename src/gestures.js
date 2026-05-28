@@ -131,20 +131,24 @@ function pointingVector(hand) {
   const middleOpen = fingerExtended(hand, FINGERS[1], palm);
   const ringOpen = fingerExtended(hand, FINGERS[2], palm);
   const pinkyOpen = fingerExtended(hand, FINGERS[3], palm);
-  const active = indexOpen > 0.72 && middleOpen < 0.48 && ringOpen < 0.42 && pinkyOpen < 0.42;
+  const active = indexOpen > 0.66 && middleOpen < 0.6 && ringOpen < 0.56 && pinkyOpen < 0.56;
   if (!active) {
     return { active: false, x: 0, y: 0, z: 0 };
   }
 
-  const dx = hand[8].x - hand[5].x;
-  const dy = hand[8].y - hand[5].y;
-  const dz = (hand[8].z ?? 0) - (hand[5].z ?? 0);
-  const length = Math.hypot(dx, dy, dz) || 1;
+  const dx = (hand[8].x - hand[6].x) * 0.62 + (hand[8].x - hand[5].x) * 0.38;
+  const dy = (hand[8].y - hand[6].y) * 0.62 + (hand[8].y - hand[5].y) * 0.38;
+  const dz = ((hand[8].z ?? 0) - (hand[6].z ?? 0)) * 0.62 + ((hand[8].z ?? 0) - (hand[5].z ?? 0)) * 0.38;
+  const planarLength = Math.hypot(dx, dy);
+  if (planarLength < 0.012) {
+    return { active: false, x: 0, y: 0, z: 0 };
+  }
+  const spatialLength = Math.hypot(dx, dy, dz) || 1;
   return {
     active: true,
-    x: clamp((dx / length) * 1.4, -1, 1),
-    y: clamp((-dy / length) * 1.35, -1, 1),
-    z: clamp((-dz / length) * 1.4, -1, 1),
+    x: clamp((dx / planarLength) * 1.08, -1, 1),
+    y: clamp((-dy / planarLength) * 1.08, -1, 1),
+    z: clamp((-dz / spatialLength) * 0.42, -0.42, 0.42),
   };
 }
 

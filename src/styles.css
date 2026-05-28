@@ -272,6 +272,32 @@ h1 {
 
 .panel-body {
   margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+}
+
+.interaction-section {
+  order: 1;
+}
+
+.model-section {
+  order: 2;
+}
+
+.import-section {
+  order: 3;
+}
+
+.show-visual-section {
+  order: 4;
+}
+
+.music-section {
+  order: 5;
+}
+
+.system-section {
+  order: 6;
 }
 
 .panel-section {
@@ -504,6 +530,21 @@ h1 {
   gap: 8px;
 }
 
+.model-more {
+  grid-column: 2 / -1;
+  min-width: 0;
+  margin-top: 10px;
+}
+
+.more-model-buttons {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding-bottom: 10px;
+}
+
+.model-more > summary {
+  white-space: nowrap;
+}
+
 .model-button {
   display: grid;
   grid-template-rows: 34px auto;
@@ -604,6 +645,91 @@ h1 {
   background:
     radial-gradient(circle, #fff 0 8%, transparent 9%),
     conic-gradient(var(--accent-primary), transparent 12%, var(--accent-secondary), transparent 34%, var(--accent-primary));
+}
+
+.ring-thumb {
+  border-radius: 50%;
+}
+
+.ring-thumb::before {
+  content: "";
+  position: absolute;
+  inset: 10px 4px 3px;
+  border: 4px solid #ffd86a;
+  border-radius: 50%;
+  box-shadow:
+    0 0 10px color-mix(in srgb, #ffd86a 62%, transparent),
+    inset 0 0 6px color-mix(in srgb, #fff6c8 38%, transparent);
+}
+
+.ring-thumb::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 12px;
+  width: 11px;
+  height: 11px;
+  background: linear-gradient(135deg, #ffffff, var(--accent-secondary));
+  clip-path: polygon(50% 0, 100% 38%, 74% 100%, 26% 100%, 0 38%);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent-secondary) 72%, transparent));
+}
+
+.cake-thumb {
+  border-radius: 8px;
+}
+
+.cake-thumb::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 4px;
+  height: 20px;
+  border-radius: 4px 4px 8px 8px;
+  background:
+    radial-gradient(circle at 18% 22%, #fff 0 5%, transparent 6%),
+    radial-gradient(circle at 52% 20%, #fff 0 5%, transparent 6%),
+    radial-gradient(circle at 82% 24%, #fff 0 5%, transparent 6%),
+    linear-gradient(180deg, #fff2b9 0 26%, #ff79b2 27% 62%, #ffd36f 63%);
+}
+
+.cake-thumb::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 8px;
+  width: 18px;
+  height: 14px;
+  background:
+    radial-gradient(circle at 50% 5%, #fff 0 9%, transparent 10%),
+    linear-gradient(90deg, transparent 0 19%, var(--accent-secondary) 20% 32%, transparent 33% 48%, var(--accent-primary) 49% 61%, transparent 62%);
+  filter: drop-shadow(0 0 5px color-mix(in srgb, #ffe66d 82%, transparent));
+}
+
+.balloons-thumb::before,
+.balloons-thumb::after {
+  content: "";
+  position: absolute;
+  border-radius: 50% 50% 46% 46%;
+}
+
+.balloons-thumb::before {
+  inset: 4px 14px 14px 2px;
+  background: var(--accent-primary);
+  box-shadow:
+    13px -1px 0 -2px var(--accent-secondary),
+    23px 5px 0 -6px #ffd36f;
+}
+
+.balloons-thumb::after {
+  left: 7px;
+  right: 7px;
+  bottom: 3px;
+  height: 14px;
+  border-left: 1px solid color-mix(in srgb, var(--theme-rim) 72%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--theme-rim) 62%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--theme-rim) 42%, transparent);
+  border-radius: 0;
 }
 
 .text-thumb {
@@ -1196,6 +1322,10 @@ input[type="color"] {
 
   .model-buttons {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #modelButtons {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .audio-controls {

@@ -70,6 +70,8 @@ export function createUI() {
     performanceValue: document.querySelector("#performanceValue"),
     sensitivity: document.querySelector("#sensitivity"),
     sensitivityValue: document.querySelector("#sensitivityValue"),
+    pointingSensitivity: document.querySelector("#pointingSensitivity"),
+    pointingSensitivityValue: document.querySelector("#pointingSensitivityValue"),
     themeButtons: [...document.querySelectorAll("[data-theme]")],
     backgroundButtons: [...document.querySelectorAll("[data-background]")],
     backgroundSelect: document.querySelector("#backgroundSelect"),
@@ -154,6 +156,7 @@ export function createUI() {
     setAudioActive: (mode) => setAudioActive(refs, mode),
     updateAudioLevel: (level) => updateAudioLevel(refs, level),
     getSensitivity: () => Number(refs.sensitivity.value) / 100,
+    getPointingSensitivity: () => Number(refs.pointingSensitivity?.value ?? 120) / 100,
     updateSensitivityLabel: () => updateSensitivityLabel(refs),
     updatePerformance: (stats) => updatePerformance(refs, stats),
     setFullscreenActive: (active) => renderIcon(refs.fullscreenBtn, active ? Minimize2 : Maximize2),
@@ -387,6 +390,17 @@ function initSensitivity(refs) {
     updateSensitivityLabel(refs);
     safeWriteStorage("gestureSensitivity", refs.sensitivity.value);
   });
+
+  const pointingSaved = Number(safeReadStorage("pointingSensitivity"));
+  const pointingValue = Number.isFinite(pointingSaved) && pointingSaved >= 60 && pointingSaved <= 180 ? pointingSaved : 120;
+  if (refs.pointingSensitivity) {
+    refs.pointingSensitivity.value = String(pointingValue);
+    updatePointingSensitivityLabel(refs);
+    refs.pointingSensitivity.addEventListener("input", () => {
+      updatePointingSensitivityLabel(refs);
+      safeWriteStorage("pointingSensitivity", refs.pointingSensitivity.value);
+    });
+  }
 }
 
 function initTextFont(refs) {
@@ -509,6 +523,12 @@ function initHelpButtons(refs) {
 
 function updateSensitivityLabel(refs) {
   refs.sensitivityValue.textContent = `${Math.round(Number(refs.sensitivity.value))}%`;
+}
+
+function updatePointingSensitivityLabel(refs) {
+  if (refs.pointingSensitivityValue && refs.pointingSensitivity) {
+    refs.pointingSensitivityValue.textContent = `${Math.round(Number(refs.pointingSensitivity.value))}%`;
+  }
 }
 
 function setStatus(refs, text, status) {

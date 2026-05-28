@@ -105,6 +105,9 @@ async function verifyInteractions(activeBrowser) {
       '[data-model="flower"]',
       '[data-model="saturn"]',
       '[data-model="fireworks"]',
+      '[data-model="ring"]',
+      '[data-model="cake"]',
+      '[data-model="balloons"]',
       '[data-model="text"]',
       '[data-model="heart"]',
     ]) {
@@ -133,6 +136,16 @@ async function verifyInteractions(activeBrowser) {
     await page.click("#showPresetToggleBtn");
     await page.waitForTimeout(120);
     await page.selectOption("#showPresetSelect", "stellarHeartLive");
+    await page.click("#showPresetToggleBtn");
+    await page.waitForTimeout(450);
+    await page.click("#showPresetToggleBtn");
+    await page.waitForTimeout(120);
+    await page.selectOption("#showPresetSelect", "confessionGrandShow");
+    await page.click("#showPresetToggleBtn");
+    await page.waitForTimeout(450);
+    await page.click("#showPresetToggleBtn");
+    await page.waitForTimeout(120);
+    await page.selectOption("#showPresetSelect", "birthdayGrandShow");
     await page.click("#showPresetToggleBtn");
     await page.waitForTimeout(450);
     await page.click("#showPresetToggleBtn");

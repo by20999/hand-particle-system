@@ -1,0 +1,163 @@
+{
+  "id": "confessionGrandShow",
+  "label": "心动告白礼",
+  "description": "面向告白、纪念日和求婚氛围的高规格粒子演出，节奏从克制靠近到烟花爆场，再回到戒指谢幕。",
+  "steps": [
+    {
+      "label": "暗场星门",
+      "duration": 6200,
+      "theme": "violet",
+      "background": "lattice",
+      "model": "saturn",
+      "camera": "wide",
+      "cameraDuration": 1300,
+      "modelBrightness": 1.08,
+      "backgroundBrightness": 1.22,
+      "burst": true
+    },
+    {
+      "label": "第一眼心跳",
+      "duration": 7200,
+      "theme": "neon",
+      "background": "stage",
+      "model": "heart",
+      "camera": "close",
+      "cameraDuration": 1400,
+      "modelBrightness": 1.18,
+      "backgroundBrightness": 1.24,
+      "burst": true
+    },
+    {
+      "label": "玫瑰靠近",
+      "duration": 8400,
+      "theme": "rose",
+      "background": "stage",
+      "model": "flower",
+      "camera": "left",
+      "cameraDuration": 1600,
+      "modelBrightness": 1.1,
+      "backgroundBrightness": 1.18
+    },
+    {
+      "label": "戒指初现",
+      "duration": 6800,
+      "theme": "gold",
+      "background": "minimal",
+      "model": "ring",
+      "camera": "close",
+      "cameraDuration": 1200,
+      "modelBrightness": 1.12,
+      "backgroundBrightness": 0.82,
+      "burst": true
+    },
+    {
+      "label": "告白定格",
+      "duration": 6200,
+      "theme": "rose",
+      "background": "nebula",
+      "model": "text",
+      "text": "喜欢你",
+      "camera": "front",
+      "cameraDuration": 900,
+      "modelBrightness": 1.24,
+      "backgroundBrightness": 1.05,
+      "freeze": true
+    },
+    {
+      "label": "心花扩散",
+      "duration": 7600,
+      "theme": "neon",
+      "background": "aurora",
+      "model": "heart",
+      "camera": "right",
+      "cameraDuration": 1400,
+      "modelBrightness": 1.15,
+      "backgroundBrightness": 1.34,
+      "burst": true
+    },
+    {
+      "label": "玫瑰环绕",
+      "duration": 7600,
+      "theme": "rose",
+      "background": "sunset",
+      "model": "flower",
+      "camera": "top",
+      "cameraDuration": 1500,
+      "modelBrightness": 1.08,
+      "backgroundBrightness": 1.28
+    },
+    {
+      "label": "钻光回眸",
+      "duration": 6800,
+      "theme": "blackGold",
+      "background": "lattice",
+      "model": "ring",
+      "camera": "right",
+      "cameraDuration": 1300,
+      "modelBrightness": 1.14,
+      "backgroundBrightness": 1.16,
+      "burst": true
+    },
+    {
+      "label": "夜空第一吻",
+      "duration": 9000,
+      "theme": "laser",
+      "background": "fireworks",
+      "model": "fireworks",
+      "camera": "wide",
+      "cameraDuration": 1100,
+      "modelBrightness": 1.2,
+      "backgroundBrightness": 1.38,
+      "burst": true
+    },
+    {
+      "label": "答案亮起",
+      "duration": 6400,
+      "theme": "gold",
+      "background": "minimal",
+      "model": "text",
+      "text": "I LOVE YOU",
+      "camera": "front",
+      "cameraDuration": 1000,
+      "modelBrightness": 1.28,
+      "backgroundBrightness": 0.78,
+      "freeze": true
+    },
+    {
+      "label": "心动返场",
+      "duration": 7200,
+      "theme": "neon",
+      "background": "stage",
+      "model": "heart",
+      "camera": "low",
+      "cameraDuration": 1300,
+      "modelBrightness": 1.2,
+      "backgroundBrightness": 1.28,
+      "burst": true
+    },
+    {
+      "label": "终章花火",
+      "duration": 10200,
+      "theme": "laser",
+      "background": "fireworks",
+      "model": "fireworks",
+      "camera": "wide",
+      "cameraDuration": 1000,
+      "modelBrightness": 1.28,
+      "backgroundBrightness": 1.48,
+      "burst": true
+    },
+    {
+      "label": "戒指谢幕",
+      "duration": 7600,
+      "theme": "blackGold",
+      "background": "minimal",
+      "model": "ring",
+      "camera": "close",
+      "cameraDuration": 1100,
+      "modelBrightness": 1.12,
+      "backgroundBrightness": 0.78,
+      "freeze": true
+    }
+  ]
+}

@@ -21,15 +21,15 @@
 
 ## 当前核心功能
 
-- 粒子模型：爱心、花朵、土星、烟花、文字、图片/Logo、GLB 3D 模型。
+- 粒子模型：爱心、花朵、土星、烟花、戒指、蛋糕、气球、文字、图片/Logo、GLB 3D 模型。
 - GPU 粒子路径：主粒子位置变形已迁到 WebGL 顶点 shader，通过 attribute + uniform 驱动，减少每帧 CPU 逐粒子更新压力；支持 WebGL2、顶点纹理和浮点/半浮点渲染目标的非移动端设备会额外启用 FBO ping-pong 位置纹理模拟。
-- 手势控制：张开手掌扩散，收拢/握拳聚回，拳头旋转控制视角，食指指向让模型朝指向方向移动。
+- 手势控制：张开手掌扩散，收拢/握拳聚回，拳头旋转控制视角；食指指向会进入独立“指向模式”，让模型按食指方向持续移动，同时临时把扩散/收缩输入压到最低并关闭拳头视角冲突。
 - 注意：所有“手势切换模型”目前已关闭，OK/比心不再触发切换。
 - 音乐响应：支持麦克风和本地音频文件，驱动模型缩放、位移、旋转、拖尾、Bloom 和底部频谱条。
 - 图片/Logo 转粒子：支持边缘、局部颜色/明暗细节联合采样、Logo 二值模式、原色/灰度/单色、透明度、轮廓增强、内部采样比例、图片亮度和图片大小，并优先走 `src/image-worker.js` Worker 高密度采样。
 - GLB 转粒子：上传 `.glb` 后按三角面面积采样模型表面，生成 3D 粒子点云；顶点色会尽量保留。
-- 控制：分层控制面板、主题、背景、更多背景、背景亮度、模型亮度、演出巡演、可视化演出编排器、导入进度、帮助说明、手势开关、静止按钮、面板缩放、图片采样参数、文字字体等。
-- 演出预设：除 `src/main.js` 内置基础预设外，扩展演出放在 `src/show-presets/`，当前包含“星河心动现场”；运行时也可通过面板文件导入或 `window.handParticleShows.importPreset()` 导入 JSON。
+- 控制：分层控制面板、主题、背景、更多背景、背景亮度、模型亮度、演出巡演、可视化演出编排器、导入进度、帮助说明、手势开关、静止按钮、张合灵敏度、指向灵敏度、面板缩放、图片采样参数、文字字体等。
+- 演出预设：除 `src/main.js` 内置基础预设外，扩展演出放在 `src/show-presets/`，当前包含“星河心动现场”“心动告白礼”“生日快乐派对”；运行时也可通过面板文件导入或 `window.handParticleShows.importPreset()` 导入 JSON。
 
 ## 运行与验证
 
@@ -70,7 +70,7 @@ npm run check
 - `index.html`：控制面板和页面结构。
 - `src/main.js`：Three.js 场景、主循环、事件绑定、图片采样、GLB 采样、手势接入、音乐轨迹和演出时间线逻辑。
 - `src/particles.js`：粒子 BufferGeometry、shader、GPU attribute/uniform 更新和可选 FBO 位置纹理模拟，是性能核心。
-- `src/shapes.js`：爱心、花朵、土星、烟花、文字、通用点云目标点生成。
+- `src/shapes.js`：爱心、花朵、土星、烟花、戒指、蛋糕、气球、文字、通用点云目标点生成。
 - `src/gestures.js`：手势张合、拳头视角、OK/比心/食指指向识别。OK/比心识别保留，但不触发切模型。
 - `src/image-worker.js`：图片/Logo Worker 采样，减少大图导入时主线程卡顿。
 - `src/audio.js`：麦克风/音频文件分析、频谱条数据、beat/kick/onset 等音乐特征。
@@ -148,7 +148,7 @@ npm run check
 
 演出系统由 `src/main.js` 的 `SHOW_PRESETS`、自定义编排本地存储和 `updateShowPreset` / `applyShowStep` 驱动：
 
-- 内置/注册预设包含自动巡演、玫瑰告白、夜场烟花、图形展台和 `src/show-presets/stellar-heart-live.json` 的“星河心动现场”。
+- 内置/注册预设包含自动巡演、玫瑰告白、夜场烟花、图形展台，以及 `src/show-presets/` 中的“星河心动现场”“心动告白礼”“生日快乐派对”。
 - `customShowPreset` 保存在浏览器 localStorage，支持 JSON 导入/导出。
 - 面板支持从 `.json` 文件导入到自定义编排；页面也暴露 `window.handParticleShows.importPreset(preset)`、`list()`、`current()`、`play(id)`、`stop()`。
 - step 支持 `label`、`duration`、`theme`、`background`、`model`、`text`、`modelBrightness`、`backgroundBrightness`、`imageBrightness`、`imageSize`、`camera`、`cameraDuration`、`burst`、`freeze`。

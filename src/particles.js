@@ -406,7 +406,9 @@ export function updateParticles(particles, state, options) {
   const modelBrightness = THREE.MathUtils.clamp(state.modelBrightness ?? 1, 0.35, 2.4);
   const imageBrightness = isImageModel ? THREE.MathUtils.clamp(state.imageBrightness ?? 2.8, 0.45, 5.2) : 1;
   const imageScale = isImageModel ? THREE.MathUtils.clamp(state.imageSize ?? 1, 0.45, 1) : 1;
-  const rawShapeGesture = handActive ? g : Math.min(g, 0.34 + state.pointerBoost * 0.18);
+  const pointingBlend = THREE.MathUtils.clamp(state.pointingBlend ?? 0, 0, 1);
+  const shapeGestureCap = THREE.MathUtils.lerp(1, 0.012, pointingBlend);
+  const rawShapeGesture = Math.min(handActive ? g : Math.min(g, 0.34 + state.pointerBoost * 0.18), shapeGestureCap);
   const shapeGesture = isFireworksModel ? Math.min(rawShapeGesture, 0.42) : rawShapeGesture;
   const musicShapeDrive = isFireworksModel ? 0.18 : 0.22;
   const fireworkExplosion = isFireworksModel ? (state.fireworkExplosion ?? 0) : 0;
@@ -453,8 +455,13 @@ export function updateParticles(particles, state, options) {
   const pointerSwirlBase = (state.pointerDown ? 0.058 : 0.024) * pointerPower;
   const damping = recovering ? 0.58 : pointerActive ? 0.9 : THREE.MathUtils.lerp(0.72, 0.86, shapeGesture);
 
+  const pointingDisturbance = 1 - pointingBlend * 0.9;
   const pointerDirection = state.gestureCommand?.pointing
-    ? new THREE.Vector3(state.gestureCommand.pointX * 0.85, state.gestureCommand.pointY * 0.52, state.gestureCommand.pointZ * 0.36)
+    ? new THREE.Vector3(
+        state.gestureCommand.pointX * 0.85 * pointingDisturbance,
+        state.gestureCommand.pointY * 0.52 * pointingDisturbance,
+        state.gestureCommand.pointZ * 0.36 * pointingDisturbance,
+      )
     : new THREE.Vector3(0, 0, 0);
   material.uniforms.uModelScale.value = modelScale;
   material.uniforms.uShapeGesture.value = shapeGesture;
@@ -469,7 +476,7 @@ export function updateParticles(particles, state, options) {
   material.uniforms.uModelType.value = isTextModel ? 4 : isFireworksModel ? 3 : isFlowerModel ? 1 : state.model === "saturn" ? 2 : 0;
   material.uniforms.uModelBrightness.value = modelBrightness;
   material.uniforms.uImageBrightness.value = imageBrightness;
-  material.uniforms.uPointer.value.lerp(pointerDirection, 0.18);
+  material.uniforms.uPointer.value.lerp(pointerDirection, pointingBlend > 0.04 ? 0.1 : 0.18);
 
   const bloomToneDown = isImageModel ? 0.48 : isTextModel ? 0.6 : isFireworksModel ? 0.76 : 0.7;
   const brightnessBloom = THREE.MathUtils.clamp(modelBrightness * (isImageModel ? Math.pow(imageBrightness, 0.32) : 1), 0.62, 1.9);

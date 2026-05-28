@@ -2,7 +2,7 @@
 
 这个目录用于放可随应用一起打包的演出 JSON。新增演出时：
 
-1. 复制 `stellar-heart-live.json` 的结构。
+1. 复制 `stellar-heart-live.json`、`confession-grand-show.json` 或 `birthday-grand-show.json` 的结构。
 2. 在 JSON 中设置唯一 `id`、显示用 `label` 和 `steps`。
 3. 在 `index.js` 中 import 并加入 `SHOW_PRESET_LIBRARY`。
 
