@@ -442,12 +442,12 @@
           </details>
 
           <details class="panel-section import-section" open>
-            <summary>导入</summary>
+            <summary>AI 动捕 / 导入</summary>
             <div class="section-content">
               <div class="field theme-field">
                 <span class="field-label">
                   素材
-                  <button class="help-button" type="button" data-help="图片/Logo 会生成平面彩色点云，GLB 会按模型表面采样成 3D 点云，姿态视频会识别人体关键点并生成粒子骨架。">?</button>
+                  <button class="help-button" type="button" data-help="DeepMotion 等外部 AI 动捕优先导出带角色和动画的 GLB/glTF；BVH 可作为动作文件导入；FBX 建议先用 Blender 转成 GLB 或 BVH。">?</button>
                 </span>
                 <div class="audio-controls import-controls">
                   <label class="file-command">
@@ -455,14 +455,24 @@
                     <span>图片/Logo</span>
                   </label>
                   <label class="file-command">
-                    <input id="meshFileInput" type="file" accept=".glb,model/gltf-binary" />
-                    <span>GLB模型</span>
+                    <input id="meshFileInput" type="file" accept=".glb,.gltf,model/gltf-binary,model/gltf+json" />
+                    <span>角色GLB</span>
+                  </label>
+                  <label class="file-command">
+                    <input id="motionFileInput" type="file" accept=".bvh" />
+                    <span>BVH动作</span>
                   </label>
                   <label class="file-command">
                     <input id="poseVideoInput" type="file" accept="video/*" />
                     <span>姿态视频</span>
                   </label>
                 </div>
+              </div>
+
+              <div class="format-guide" aria-label="推荐动作格式">
+                <span><strong>最佳</strong> 动画 GLB/glTF</span>
+                <span><strong>可用</strong> BVH 动作</span>
+                <span><strong>FBX</strong> 先转 GLB/BVH</span>
               </div>
 
               <div id="importProgress" class="import-progress" hidden>
@@ -566,7 +576,7 @@
               </details>
 
               <details class="nested-section mesh-settings">
-                <summary>GLB 细节</summary>
+                <summary>AI 角色 / GLB 细节</summary>
                 <label class="field image-option-field">
                   <span class="field-label">
                     密度
@@ -618,10 +628,159 @@
                     <strong id="meshSpreadValue">100%</strong>
                   </span>
                 </label>
+
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    动画
+                    <button class="help-button" type="button" data-help="开启后，带内置骨骼/节点动画的 GLB/glTF 会在后台播放，并按当前动作姿态重新生成粒子目标；关闭相当于暂停。">?</button>
+                  </span>
+                  <span class="toggle-row">
+                    <input id="meshAnimationEnabled" type="checkbox" checked />
+                    <span>播放 / 暂停</span>
+                  </span>
+                </label>
+
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    循环
+                    <button class="help-button" type="button" data-help="开启后 GLB/glTF 内置动画或 BVH 重定向动作会循环播放；关闭后播到末尾停住。">?</button>
+                  </span>
+                  <span class="toggle-row">
+                    <input id="meshAnimationLoop" type="checkbox" checked />
+                    <span>循环动作</span>
+                  </span>
+                </label>
+
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    动画速度
+                    <button class="help-button" type="button" data-help="控制 GLB/glTF 内置动画或 BVH 重定向动作的播放速度。">?</button>
+                  </span>
+                  <span class="scale-control has-steppers">
+                    <button class="step-button" type="button" data-step-target="meshAnimationSpeed" data-step="-5" aria-label="降低动画速度">-</button>
+                    <input id="meshAnimationSpeed" type="range" min="25" max="220" step="5" value="100" />
+                    <button class="step-button" type="button" data-step-target="meshAnimationSpeed" data-step="5" aria-label="提高动画速度">+</button>
+                    <strong id="meshAnimationSpeedValue">100%</strong>
+                  </span>
+                </label>
+
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    动作跟随
+                    <button class="help-button" type="button" data-help="控制动画模型重新采样粒子目标的频率；越高动作越顺，设备压力也越大。">?</button>
+                  </span>
+                  <span class="scale-control has-steppers">
+                    <button class="step-button" type="button" data-step-target="meshAnimationFollow" data-step="-5" aria-label="降低动作跟随">-</button>
+                    <input id="meshAnimationFollow" type="range" min="35" max="180" step="5" value="100" />
+                    <button class="step-button" type="button" data-step-target="meshAnimationFollow" data-step="5" aria-label="提高动作跟随">+</button>
+                    <strong id="meshAnimationFollowValue">100%</strong>
+                  </span>
+                </label>
+
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    朝向
+                    <button class="help-button" type="button" data-help="修正外部动捕导出的角色朝向，适合导入后人物侧身或背对镜头的情况。">?</button>
+                  </span>
+                  <span class="scale-control has-steppers">
+                    <button class="step-button" type="button" data-step-target="meshYaw" data-step="-15" aria-label="向左旋转角色">-</button>
+                    <input id="meshYaw" type="range" min="-180" max="180" step="15" value="0" />
+                    <button class="step-button" type="button" data-step-target="meshYaw" data-step="15" aria-label="向右旋转角色">+</button>
+                    <strong id="meshYawValue">0°</strong>
+                  </span>
+                </label>
+
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    地面
+                    <button class="help-button" type="button" data-help="上下移动导入角色点云，让脚底或人物中心更适合当前舞台画面。">?</button>
+                  </span>
+                  <span class="scale-control has-steppers">
+                    <button class="step-button" type="button" data-step-target="meshGround" data-step="-5" aria-label="降低角色高度">-</button>
+                    <input id="meshGround" type="range" min="-120" max="120" step="5" value="0" />
+                    <button class="step-button" type="button" data-step-target="meshGround" data-step="5" aria-label="提高角色高度">+</button>
+                    <strong id="meshGroundValue">0%</strong>
+                  </span>
+                </label>
+
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    居中
+                    <button class="help-button" type="button" data-help="开启后以导入角色点云包围盒中心对齐舞台中心，适合 DeepMotion 等工具导出的角色偏离原点时使用。">?</button>
+                  </span>
+                  <span class="toggle-row">
+                    <input id="meshAutoCenter" type="checkbox" checked />
+                    <span>人物居中</span>
+                  </span>
+                </label>
+              </details>
+
+              <details class="nested-section motion-settings">
+                <summary>AI 动作 / BVH 细节</summary>
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    循环
+                    <button class="help-button" type="button" data-help="开启后 BVH 粒子骨架循环播放；BVH 成功重定向到 GLB 时使用上方 GLB 的播放和循环设置。">?</button>
+                  </span>
+                  <span class="toggle-row">
+                    <input id="motionLoop" type="checkbox" checked />
+                    <span>循环骨架</span>
+                  </span>
+                </label>
+
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    骨架密度
+                    <button class="help-button" type="button" data-help="控制 BVH 动作骨架的可见粒子量；如果 BVH 成功重定向到 GLB，则主要由 GLB 密度控制。">?</button>
+                  </span>
+                  <span class="scale-control has-steppers">
+                    <button class="step-button" type="button" data-step-target="motionDensity" data-step="-5" aria-label="降低 BVH 骨架密度">-</button>
+                    <input id="motionDensity" type="range" min="35" max="180" step="5" value="100" />
+                    <button class="step-button" type="button" data-step-target="motionDensity" data-step="5" aria-label="提高 BVH 骨架密度">+</button>
+                    <strong id="motionDensityValue">100%</strong>
+                  </span>
+                </label>
+
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    动作速度
+                    <button class="help-button" type="button" data-help="控制 BVH 动作骨架播放速度，适合把舞蹈调成慢动作或更强节奏感。">?</button>
+                  </span>
+                  <span class="scale-control has-steppers">
+                    <button class="step-button" type="button" data-step-target="motionSpeed" data-step="-5" aria-label="降低 BVH 动作速度">-</button>
+                    <input id="motionSpeed" type="range" min="25" max="220" step="5" value="100" />
+                    <button class="step-button" type="button" data-step-target="motionSpeed" data-step="5" aria-label="提高 BVH 动作速度">+</button>
+                    <strong id="motionSpeedValue">100%</strong>
+                  </span>
+                </label>
+
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    骨架大小
+                    <button class="help-button" type="button" data-help="缩放 BVH 粒子骨架整体尺寸；不改变原始动作文件。">?</button>
+                  </span>
+                  <span class="scale-control has-steppers">
+                    <button class="step-button" type="button" data-step-target="motionSize" data-step="-5" aria-label="缩小 BVH 骨架">-</button>
+                    <input id="motionSize" type="range" min="45" max="260" step="5" value="100" />
+                    <button class="step-button" type="button" data-step-target="motionSize" data-step="5" aria-label="放大 BVH 骨架">+</button>
+                    <strong id="motionSizeValue">100%</strong>
+                  </span>
+                </label>
               </details>
 
               <details class="nested-section pose-settings">
                 <summary>姿态视频细节</summary>
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    驱动3D
+                    <button class="help-button" type="button" data-help="开启后，上传姿态视频时会优先尝试驱动当前带骨骼的 GLB/glTF 人物；没有骨骼或匹配失败时仍回退为粒子骨架。">?</button>
+                  </span>
+                  <span class="toggle-row">
+                    <input id="poseRetargetEnabled" type="checkbox" checked />
+                    <span>视频驱动3D人物</span>
+                  </span>
+                </label>
+
                 <label class="field image-option-field">
                   <span class="field-label">
                     骨架密度
@@ -658,6 +817,19 @@
                     <input id="poseAura" type="range" min="0" max="180" step="5" value="100" />
                     <button class="step-button" type="button" data-step-target="poseAura" data-step="5" aria-label="提高姿态光晕">+</button>
                     <strong id="poseAuraValue">100%</strong>
+                  </span>
+                </label>
+
+                <label class="field image-option-field">
+                  <span class="field-label">
+                    驱动平滑
+                    <button class="help-button" type="button" data-help="控制视频驱动 3D 骨骼时的动作平滑程度；越高越稳，越低越贴近视频但更容易抖动。">?</button>
+                  </span>
+                  <span class="scale-control has-steppers">
+                    <button class="step-button" type="button" data-step-target="poseRetargetSmoothing" data-step="-5" aria-label="降低视频驱动平滑">-</button>
+                    <input id="poseRetargetSmoothing" type="range" min="0" max="85" step="5" value="35" />
+                    <button class="step-button" type="button" data-step-target="poseRetargetSmoothing" data-step="5" aria-label="提高视频驱动平滑">+</button>
+                    <strong id="poseRetargetSmoothingValue">35%</strong>
                   </span>
                 </label>
               </details>
@@ -744,6 +916,52 @@
               <div class="quality-row">
                 <span>性能</span>
                 <strong id="performanceValue">-- FPS · --</strong>
+              </div>
+
+              <div class="field theme-field">
+                <span class="field-label">
+                  现场
+                  <button class="help-button" type="button" data-help="现场安全会降低粒子绘制量、Bloom 和背景复杂度，优先保证投屏稳定、不过曝、不卡顿。">?</button>
+                </span>
+                <div class="audio-controls utility-controls">
+                  <button id="safetyModeBtn" class="small-command" type="button">安全</button>
+                  <button id="healthRefreshBtn" class="small-command" type="button">检查</button>
+                </div>
+              </div>
+
+              <div id="healthPanel" class="health-panel" aria-label="健康检查">
+                <div class="health-item" data-health-key="webgl">
+                  <span>WebGL</span>
+                  <strong>检查中</strong>
+                </div>
+                <div class="health-item" data-health-key="camera">
+                  <span>摄像头</span>
+                  <strong>待授权</strong>
+                </div>
+                <div class="health-item" data-health-key="mediapipe">
+                  <span>MediaPipe</span>
+                  <strong>加载中</strong>
+                </div>
+                <div class="health-item" data-health-key="mic">
+                  <span>麦克风</span>
+                  <strong>未开启</strong>
+                </div>
+                <div class="health-item" data-health-key="audio">
+                  <span>音频</span>
+                  <strong>未开启</strong>
+                </div>
+                <div class="health-item" data-health-key="resources">
+                  <span>资源</span>
+                  <strong>正常</strong>
+                </div>
+                <div class="health-item" data-health-key="quality">
+                  <span>画质</span>
+                  <strong>自动</strong>
+                </div>
+                <div class="health-item" data-health-key="fps">
+                  <span>FPS</span>
+                  <strong>测量中</strong>
+                </div>
               </div>
 
               <label class="field scale-field">

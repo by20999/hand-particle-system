@@ -68,6 +68,9 @@ export function createUI() {
     panelScaleValue: document.querySelector("#panelScaleValue"),
     qualityValue: document.querySelector("#qualityValue"),
     performanceValue: document.querySelector("#performanceValue"),
+    safetyModeBtn: document.querySelector("#safetyModeBtn"),
+    healthRefreshBtn: document.querySelector("#healthRefreshBtn"),
+    healthItems: [...document.querySelectorAll("[data-health-key]")],
     sensitivity: document.querySelector("#sensitivity"),
     sensitivityValue: document.querySelector("#sensitivityValue"),
     pointingSensitivity: document.querySelector("#pointingSensitivity"),
@@ -86,6 +89,7 @@ export function createUI() {
     audioFileInput: document.querySelector("#audioFileInput"),
     imageFileInput: document.querySelector("#imageFileInput"),
     meshFileInput: document.querySelector("#meshFileInput"),
+    motionFileInput: document.querySelector("#motionFileInput"),
     poseVideoInput: document.querySelector("#poseVideoInput"),
     meshDensity: document.querySelector("#meshDensity"),
     meshDensityValue: document.querySelector("#meshDensityValue"),
@@ -95,12 +99,33 @@ export function createUI() {
     meshDepthValue: document.querySelector("#meshDepthValue"),
     meshSpread: document.querySelector("#meshSpread"),
     meshSpreadValue: document.querySelector("#meshSpreadValue"),
+    meshAnimationEnabled: document.querySelector("#meshAnimationEnabled"),
+    meshAnimationLoop: document.querySelector("#meshAnimationLoop"),
+    meshAnimationSpeed: document.querySelector("#meshAnimationSpeed"),
+    meshAnimationSpeedValue: document.querySelector("#meshAnimationSpeedValue"),
+    meshAnimationFollow: document.querySelector("#meshAnimationFollow"),
+    meshAnimationFollowValue: document.querySelector("#meshAnimationFollowValue"),
+    meshYaw: document.querySelector("#meshYaw"),
+    meshYawValue: document.querySelector("#meshYawValue"),
+    meshGround: document.querySelector("#meshGround"),
+    meshGroundValue: document.querySelector("#meshGroundValue"),
+    meshAutoCenter: document.querySelector("#meshAutoCenter"),
+    motionDensity: document.querySelector("#motionDensity"),
+    motionDensityValue: document.querySelector("#motionDensityValue"),
+    motionLoop: document.querySelector("#motionLoop"),
+    motionSpeed: document.querySelector("#motionSpeed"),
+    motionSpeedValue: document.querySelector("#motionSpeedValue"),
+    motionSize: document.querySelector("#motionSize"),
+    motionSizeValue: document.querySelector("#motionSizeValue"),
     poseDensity: document.querySelector("#poseDensity"),
     poseDensityValue: document.querySelector("#poseDensityValue"),
     poseFollow: document.querySelector("#poseFollow"),
     poseFollowValue: document.querySelector("#poseFollowValue"),
     poseAura: document.querySelector("#poseAura"),
     poseAuraValue: document.querySelector("#poseAuraValue"),
+    poseRetargetEnabled: document.querySelector("#poseRetargetEnabled"),
+    poseRetargetSmoothing: document.querySelector("#poseRetargetSmoothing"),
+    poseRetargetSmoothingValue: document.querySelector("#poseRetargetSmoothingValue"),
     imageContour: document.querySelector("#imageContour"),
     imageContourValue: document.querySelector("#imageContourValue"),
     imageColorMode: document.querySelector("#imageColorMode"),
@@ -134,6 +159,7 @@ export function createUI() {
   initTextFont(refs);
   initImageOptions(refs);
   initBrightnessControls(refs);
+  initAnimationToggles(refs);
   initRangeSteppers(refs);
   initAudioSpectrum(refs);
   initHelpButtons(refs);
@@ -143,6 +169,8 @@ export function createUI() {
     setStatus: (text, status) => setStatus(refs, text, status),
     setDiagnostic: (text) => setDiagnostic(refs, text),
     setQuality: (profile) => setQuality(refs, profile),
+    setSafetyModeActive: (active) => setSafetyModeActive(refs, active),
+    updateHealth: (items) => updateHealth(refs, items),
     setThemeActive: (themeId) => setThemeActive(refs, themeId),
     setGestureControlActive: (active) => setGestureControlActive(refs, active),
     setFreezeActive: (active) => setFreezeActive(refs, active),
@@ -160,6 +188,7 @@ export function createUI() {
     getModelBrightness: () => Number(refs.modelBrightness?.value ?? 100) / 100,
     getModelSize: () => Number(refs.modelSize?.value ?? 100) / 100,
     getMeshOptions: () => getMeshOptions(refs),
+    getMotionOptions: () => getMotionOptions(refs),
     getPoseOptions: () => getPoseOptions(refs),
     getBackgroundBrightness: () => Number(refs.backgroundBrightness?.value ?? 100) / 100,
     updateImageSizeLabel: (particleCount) => updateImageSizeLabel(refs, particleCount),
@@ -467,9 +496,17 @@ function initBrightnessControls(refs) {
     { input: refs.meshSize, output: refs.meshSizeValue, storage: "meshSize", fallback: 100 },
     { input: refs.meshDepth, output: refs.meshDepthValue, storage: "meshDepth", fallback: 100 },
     { input: refs.meshSpread, output: refs.meshSpreadValue, storage: "meshSpread", fallback: 100 },
+    { input: refs.meshAnimationSpeed, output: refs.meshAnimationSpeedValue, storage: "meshAnimationSpeed", fallback: 100 },
+    { input: refs.meshAnimationFollow, output: refs.meshAnimationFollowValue, storage: "meshAnimationFollow", fallback: 100 },
+    { input: refs.meshYaw, output: refs.meshYawValue, storage: "meshYaw", fallback: 0, format: "degrees" },
+    { input: refs.meshGround, output: refs.meshGroundValue, storage: "meshGround", fallback: 0 },
+    { input: refs.motionDensity, output: refs.motionDensityValue, storage: "motionDensity", fallback: 100 },
+    { input: refs.motionSpeed, output: refs.motionSpeedValue, storage: "motionSpeed", fallback: 100 },
+    { input: refs.motionSize, output: refs.motionSizeValue, storage: "motionSize", fallback: 100 },
     { input: refs.poseDensity, output: refs.poseDensityValue, storage: "poseDensity", fallback: 100 },
     { input: refs.poseFollow, output: refs.poseFollowValue, storage: "poseFollow", fallback: 100 },
     { input: refs.poseAura, output: refs.poseAuraValue, storage: "poseAura", fallback: 100 },
+    { input: refs.poseRetargetSmoothing, output: refs.poseRetargetSmoothingValue, storage: "poseRetargetSmoothing", fallback: 35 },
   ];
 
   for (const control of controls) {
@@ -479,11 +516,29 @@ function initBrightnessControls(refs) {
     const max = Number(control.input.max);
     const value = Number.isFinite(saved) && saved >= min && saved <= max ? saved : control.fallback;
     control.input.value = String(value);
-    updatePercentLabel(control.output, value);
+    updateRangeLabel(control.output, value, control.format);
     control.input.addEventListener("input", () => {
       const nextValue = Number(control.input.value);
-      updatePercentLabel(control.output, nextValue);
+      updateRangeLabel(control.output, nextValue, control.format);
       safeWriteStorage(control.storage, String(nextValue));
+    });
+  }
+}
+
+function initAnimationToggles(refs) {
+  const toggles = [
+    { input: refs.meshAnimationEnabled, storage: "meshAnimationEnabled", fallback: true },
+    { input: refs.meshAnimationLoop, storage: "meshAnimationLoop", fallback: true },
+    { input: refs.meshAutoCenter, storage: "meshAutoCenter", fallback: true },
+    { input: refs.motionLoop, storage: "motionLoop", fallback: true },
+    { input: refs.poseRetargetEnabled, storage: "poseRetargetEnabled", fallback: true },
+  ];
+  for (const toggle of toggles) {
+    if (!toggle.input) continue;
+    const saved = safeReadStorage(toggle.storage);
+    toggle.input.checked = saved == null ? toggle.fallback : saved !== "false";
+    toggle.input.addEventListener("change", () => {
+      safeWriteStorage(toggle.storage, toggle.input.checked ? "true" : "false");
     });
   }
 }
@@ -502,9 +557,17 @@ function initRangeSteppers(refs) {
       refs.meshSize,
       refs.meshDepth,
       refs.meshSpread,
+      refs.meshAnimationSpeed,
+      refs.meshAnimationFollow,
+      refs.meshYaw,
+      refs.meshGround,
+      refs.motionDensity,
+      refs.motionSpeed,
+      refs.motionSize,
       refs.poseDensity,
       refs.poseFollow,
       refs.poseAura,
+      refs.poseRetargetSmoothing,
     ]
       .filter(Boolean)
       .map((input) => [input.id, input]),
@@ -528,6 +591,15 @@ function updatePercentLabel(output, value) {
   if (output) {
     output.textContent = `${Math.round(Number(value))}%`;
   }
+}
+
+function updateRangeLabel(output, value, format) {
+  if (!output) return;
+  if (format === "degrees") {
+    output.textContent = `${Math.round(Number(value))}°`;
+    return;
+  }
+  updatePercentLabel(output, value);
 }
 
 function updateImageSizeLabel(refs, particleCount) {
@@ -557,6 +629,22 @@ function getMeshOptions(refs) {
     size: Number(refs.meshSize?.value ?? 100) / 100,
     depth: Number(refs.meshDepth?.value ?? 100) / 100,
     spread: Number(refs.meshSpread?.value ?? 100) / 100,
+    animationEnabled: refs.meshAnimationEnabled ? refs.meshAnimationEnabled.checked : true,
+    animationLoop: refs.meshAnimationLoop ? refs.meshAnimationLoop.checked : true,
+    animationSpeed: Number(refs.meshAnimationSpeed?.value ?? 100) / 100,
+    animationFollow: Number(refs.meshAnimationFollow?.value ?? 100) / 100,
+    yaw: THREE.MathUtils.degToRad(Number(refs.meshYaw?.value ?? 0)),
+    groundOffset: Number(refs.meshGround?.value ?? 0) / 100,
+    autoCenter: refs.meshAutoCenter ? refs.meshAutoCenter.checked : true,
+  };
+}
+
+function getMotionOptions(refs) {
+  return {
+    density: Number(refs.motionDensity?.value ?? 100) / 100,
+    loop: refs.motionLoop ? refs.motionLoop.checked : true,
+    speed: Number(refs.motionSpeed?.value ?? 100) / 100,
+    size: Number(refs.motionSize?.value ?? 100) / 100,
   };
 }
 
@@ -565,6 +653,8 @@ function getPoseOptions(refs) {
     density: Number(refs.poseDensity?.value ?? 100) / 100,
     follow: Number(refs.poseFollow?.value ?? 100) / 100,
     aura: Number(refs.poseAura?.value ?? 100) / 100,
+    retargetEnabled: refs.poseRetargetEnabled ? refs.poseRetargetEnabled.checked : true,
+    retargetSmoothing: Number(refs.poseRetargetSmoothing?.value ?? 35) / 100,
   };
 }
 
@@ -628,6 +718,27 @@ function setDiagnostic(refs, text) {
 function setQuality(refs, profile) {
   if (refs.qualityValue) {
     refs.qualityValue.textContent = `${profile.label} · ${Math.round(profile.particleCount / 1000)}k`;
+  }
+}
+
+function setSafetyModeActive(refs, active) {
+  refs.safetyModeBtn?.classList.toggle("is-active", active);
+  if (refs.safetyModeBtn) {
+    refs.safetyModeBtn.textContent = active ? "安全中" : "安全";
+  }
+}
+
+function updateHealth(refs, items = {}) {
+  for (const item of refs.healthItems ?? []) {
+    const value = items[item.dataset.healthKey];
+    if (!value) continue;
+    const label = typeof value === "string" ? value : value.label;
+    const status = typeof value === "string" ? "ok" : value.status;
+    const output = item.querySelector("strong");
+    if (output) output.textContent = label ?? "--";
+    item.classList.toggle("is-ok", status === "ok");
+    item.classList.toggle("is-warn", status === "warn");
+    item.classList.toggle("is-error", status === "error");
   }
 }
 

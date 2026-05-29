@@ -21,17 +21,20 @@
 
 ## 当前核心功能
 
-- 粒子模型：爱心、花朵、土星、烟花、戒指、蛋糕、气球、文字、姿态视频骨架、图片/Logo、GLB 3D 模型。
+- 粒子模型：爱心、花朵、土星、烟花、戒指、蛋糕、气球、文字、姿态视频骨架、BVH 动作骨架、图片/Logo、GLB/glTF 3D 模型。
 - GPU 粒子路径：主粒子位置变形已迁到 WebGL 顶点 shader，通过 attribute + uniform 驱动，减少每帧 CPU 逐粒子更新压力；支持 WebGL2、顶点纹理和浮点/半浮点渲染目标的非移动端设备会额外启用 FBO ping-pong 位置纹理模拟。
 - 手势控制：张开手掌扩散，收拢/握拳聚回，拳头旋转控制视角；食指指向会进入独立“指向模式”，让模型按食指方向持续移动，同时临时把扩散/收缩输入压到最低并关闭拳头视角冲突。
 - 注意：所有“手势切换模型”目前已关闭，OK/比心不再触发切换。
 - 音乐响应：支持麦克风和本地音频文件，驱动模型缩放、位移、旋转、拖尾、Bloom 和底部频谱条。
 - 图片/Logo 转粒子：支持边缘、局部颜色/明暗细节联合采样、Logo 二值模式、原色/灰度/单色、透明度、轮廓增强、内部采样比例、图片亮度和图片大小，并优先走 `src/image-worker.js` Worker 高密度采样。
-- GLB 转粒子：上传 `.glb` 后按三角面面积采样模型表面，生成 3D 粒子点云；顶点色会尽量保留；导入面板可调密度、大小、厚度和表面扩散。
-- 姿态视频转粒子：上传人物/舞蹈视频后，使用 `@mediapipe/pose` 从本地视频抽帧识别人体关键点，并生成粒子骨架、关节光点和四肢端点光晕；这是轻量版视频姿态驱动，不要求 GLB 有骨骼。
-- 姿态视频性能策略：Pose 抽帧间隔按画质档位自适应；姿态模型只重写当前可见粒子范围并跳过 FBO 位置纹理模拟，避免每次视频结果都更新整档粒子。
-- 控制：分层控制面板、主题、背景、更多背景、背景亮度、模型亮度、模型大小、演出巡演、可视化演出编排器、导入进度、帮助说明、手势开关、静止按钮、张合灵敏度、指向灵敏度、面板缩放、图片/GLB/姿态采样参数、姿态视频导入、文字字体等。
-- 演出预设：除 `src/main.js` 内置基础预设外，扩展演出放在 `src/show-presets/`，当前包含“星河心动现场”“心动告白礼”“生日快乐派对”；运行时也可通过面板文件导入或 `window.handParticleShows.importPreset()` 导入 JSON。
+- AI 动捕动作文件：推荐用户先用 DeepMotion、Rokoko、Move AI、Plask 或 Blender 插件把视频转成动作文件；最佳导出为带角色和动画的 `.glb` / `.gltf`，`.bvh` 可作为动作文件导入，`.fbx` 不建议直接导入，应先转成 GLB/glTF 或 BVH。
+- GLB/glTF 转粒子：上传 `.glb` 或自包含 `.gltf` 后按三角面面积采样模型表面，生成 3D 粒子点云；顶点色和 base color 贴图会尽量保留，贴图路径会用三角形重心坐标插值 UV 后采样像素颜色；带内置动画的文件会保留 glTF 场景并用 `AnimationMixer` 播放，再按固定采样计划定时重采样当前姿态；导入面板可调密度、大小、厚度、表面扩散、播放/暂停、循环、动画速度、动作跟随、朝向、地面高度和人物居中。
+- BVH 动作：上传 `.bvh` 后优先尝试用 `SkeletonUtils.retargetClip` 重定向到当前带骨骼 GLB/glTF；若骨骼命名匹配不足或重定向失败，则退回为 3D 粒子动作骨架，可调骨架密度、循环、速度和大小。
+- 姿态视频转粒子 / 驱动 3D：上传人物/舞蹈视频后，使用 `@mediapipe/pose` 从本地视频抽帧识别人体关键点；若当前已有带骨骼 GLB/glTF 且“视频驱动3D”开启，会用肩-肘-腕、胯-膝-踝等方向 best-effort 驱动 humanoid 骨骼并实时重采样 mesh 粒子；驱动层包含骨骼别名/层级补全、身体比例感知、轻量脚底接触稳定、低置信度保持和平滑旋转限幅；没有合适骨骼时会明确提示导入失败并回退为粒子骨架、关节光点和四肢端点光晕。
+- 姿态视频性能策略：Pose 抽帧间隔按画质档位自适应；姿态骨架只重写当前可见粒子范围并跳过 FBO 位置纹理模拟；视频驱动 3D 人物时复用 GLB/glTF 固定表面采样计划，避免每次视频结果都更新整档粒子。
+- 控制：分层控制面板、主题、背景、更多背景、背景亮度、模型亮度、模型大小、演出巡演、可视化演出编排器、AI 动捕/导入推荐格式、导入进度、健康检查、现场安全模式、帮助说明、手势开关、静止按钮、张合灵敏度、指向灵敏度、面板缩放、图片/GLB/BVH/姿态采样参数、GLB 动作播放/循环/朝向/地面/居中、姿态视频导入、视频驱动 3D 开关、驱动平滑、文字字体等。
+- 现场稳定性：系统区健康检查显示 WebGL、摄像头、MediaPipe、麦克风、音频、资源、画质和 FPS；“现场安全”会降低可见粒子量、Bloom 和背景复杂度，优先保证投屏稳定和主体辨识度。
+- 演出预设：基础预设和扩展预设统一由 `src/show-controller.js` 注册；扩展演出放在 `src/show-presets/`，当前包含“星河心动现场”“心动告白礼”“生日快乐派对”；运行时也可通过面板文件导入或 `window.handParticleShows.importPreset()` 导入 JSON。
 
 ## 运行与验证
 
@@ -70,7 +73,12 @@ npm run check
 ## 关键文件
 
 - `index.html`：控制面板和页面结构。
-- `src/main.js`：Three.js 场景、主循环、事件绑定、图片采样、GLB 采样、姿态视频采样、手势接入、音乐轨迹和演出时间线逻辑。
+- `src/main.js`：Three.js 场景、主循环、事件绑定、图片采样调度、动作/姿态接入、手势接入、音乐轨迹、健康检查、现场安全和演出时间线逻辑。
+- `src/importers/mesh-importer.js`：GLB/glTF 静态与动画采样、贴图颜色读取和动态 mesh 重采样。
+- `src/importers/bvh-importer.js`：BVH 文本读取和 `BVHLoader` 解析。
+- `src/importers/pose-video-importer.js`：姿态视频元素创建、metadata 等待和资源释放。
+- `src/motion/pose-retarget-config.js`：姿态连接、重定向配置和骨骼命名归一化。
+- `src/show-controller.js`：演出预设、镜头预设、自定义演出 JSON 规范化和预设列表。
 - `src/particles.js`：粒子 BufferGeometry、shader、GPU attribute/uniform 更新和可选 FBO 位置纹理模拟，是性能核心。
 - `src/shapes.js`：爱心、花朵、土星、烟花、戒指、蛋糕、气球、文字、通用点云目标点生成。
 - `src/gestures.js`：手势张合、拳头视角、OK/比心/食指指向识别。OK/比心识别保留，但不触发切模型。
@@ -149,7 +157,7 @@ npm run check
 
 ## 演出编排器现状
 
-演出系统由 `src/main.js` 的 `SHOW_PRESETS`、自定义编排本地存储和 `updateShowPreset` / `applyShowStep` 驱动：
+演出系统由 `src/show-controller.js` 的 `SHOW_PRESETS`、自定义编排本地存储和 `src/main.js` 内的 `updateShowPreset` / `applyShowStep` 驱动：
 
 - 内置/注册预设包含自动巡演、玫瑰告白、夜场烟花、图形展台，以及 `src/show-presets/` 中的“星河心动现场”“心动告白礼”“生日快乐派对”。
 - `customShowPreset` 保存在浏览器 localStorage，支持 JSON 导入/导出。
@@ -163,6 +171,8 @@ npm run check
 
 - WebGL attribute 数量有限，新增 attribute 前要考虑移动端限制。之前已通过打包 `aTargetMeta`、`aParticleParams` 避免超限。
 - 图片顶点颜色会走 `uUseVertexColor`，普通模型仍走主题色混合。
+- BVH 重定向不是“任意模型必定成功”：当前按骨骼名称/别名做 best-effort 匹配，匹配不足会自动转为 BVH 粒子骨架播放。
+- 姿态视频驱动 3D 也是 best-effort：依赖 humanoid 骨骼命名和蒙皮质量；当前已有轻量脚底接触稳定、比例感知、旋转限幅和低置信度保护，但还不是专业动捕级全身 IK、脚底硬锁或复杂体型比例求解。
 - `snapParticlesToTargets` 在 GPU 路径下基本不做 CPU 对齐。
 - `dist/` 和验证截图通常是生成产物，不一定需要提交。
 - MediaPipe 资源在 `public/mediapipe/hands` 和 `public/mediapipe/pose`，不要随意改路径。

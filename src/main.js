@@ -1,10 +1,10 @@
-import "./styles.css";
+﻿import "./styles.css";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 import { createAudioReactor, stopAudioSource, updateAudioReactor, useAudioFile, useMicrophone } from "./audio.js";
 import {
   applyBackgroundTheme,
@@ -24,6 +24,22 @@ import {
   palmCenter,
 } from "./gestures.js";
 import { applyStaticLightColors, createStaticLightSources, updateStaticLights } from "./lighting.js";
+import { loadBvhMotion } from "./importers/bvh-importer.js";
+import { createPoseVideoElement, disposePoseVideoElement } from "./importers/pose-video-importer.js";
+import {
+  POSE_CONNECTIONS_LOCAL,
+  POSE_CORE_IDS,
+  POSE_DETAIL_NODE_IDS,
+  POSE_LEFT_IDS,
+  POSE_NODE_IDS,
+  POSE_RETARGET_ANGLE_LIMITS,
+  POSE_RETARGET_CHILD,
+  POSE_RETARGET_REQUIRED,
+  POSE_RETARGET_SIDE_POINTS,
+  POSE_RETARGET_SPECS,
+  POSE_RIGHT_IDS,
+  canonicalBoneName,
+} from "./motion/pose-retarget-config.js";
 import {
   createParticleSystem,
   setCustomText,
@@ -38,7 +54,19 @@ import {
 } from "./particles.js";
 import { THEMES, applyThemeToDocument, getTheme } from "./themes.js";
 import { createUI } from "./ui.js";
-import { SHOW_PRESET_LIBRARY } from "./show-presets/index.js";
+import { createMeshParticleSource, sampleMeshSource } from "./importers/mesh-importer.js";
+import {
+  CAMERA_SHOTS,
+  CUSTOM_SHOW_STORAGE_KEY,
+  DEFAULT_CUSTOM_SHOW,
+  SHOW_PRESETS,
+  cloneShowPreset,
+  nextStepLabel,
+  normalizeShowPreset,
+  normalizeShowStep,
+  showPresetOptionList,
+  vectorArray,
+} from "./show-controller.js";
 
 const POINTING_MODE_HOLD_MS = 560;
 const POINTING_EXIT_EPSILON = 0.025;
@@ -78,20 +106,36 @@ const {
   modelPlaceholderButtons,
   modelBrightness,
   modelSize,
+  safetyModeBtn,
+  healthRefreshBtn,
   micToggleBtn,
   audioFileInput,
   imageFileInput,
   imageBrightness,
   imageSize,
   meshFileInput,
+  motionFileInput,
   poseVideoInput,
   meshDensity,
   meshSize,
   meshDepth,
   meshSpread,
+  meshAnimationEnabled,
+  meshAnimationLoop,
+  meshAnimationSpeed,
+  meshAnimationFollow,
+  meshYaw,
+  meshGround,
+  meshAutoCenter,
+  motionDensity,
+  motionLoop,
+  motionSpeed,
+  motionSize,
   poseDensity,
   poseFollow,
   poseAura,
+  poseRetargetEnabled,
+  poseRetargetSmoothing,
   audioStopBtn,
 } = ui.refs;
 
@@ -104,6 +148,12 @@ ui.setThemeActive(initialTheme.id);
 applyThemeToDocument(initialTheme);
 
 const clock = new THREE.Clock();
+
+if (!hasWebGLSupport()) {
+  ui.setStatus("WebGL 不可用，无法启动粒子画面", "error");
+  ui.setDiagnostic("错误：当前浏览器或显卡环境不支持 WebGL，请更换 Chrome/Edge 或检查硬件加速。");
+  throw new Error("WebGL is not available");
+}
 
 const renderer = new THREE.WebGLRenderer({
   canvas,
@@ -136,6 +186,14 @@ const renderPass = new RenderPass(scene, camera);
 const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.58, 0.42, 0.33);
 const composer = new EffectComposer(renderer);
 composer.addPass(renderPass);
+
+renderer.domElement.addEventListener("webglcontextlost", (event) => {
+  event.preventDefault();
+  state.resourceFailures += 1;
+  ui.setStatus("WebGL 上下文丢失", "error");
+  showHeldDiagnostic("WebGL 上下文丢失，请刷新页面或开启现场安全模式后重试", 12000);
+  updateHealthPanel(true);
+});
 composer.addPass(bloomPass);
 
 const particles = createParticleSystem({
@@ -164,247 +222,16 @@ let imageWorker = null;
 let imageWorkerJobId = 0;
 const imageWorkerJobs = new Map();
 let meshBasePoints = [];
+let meshTransformedPoints = [];
+let meshAnimationSource = null;
 let meshOptionsFrame = 0;
+let bvhMotionSource = null;
+let poseVideoRetargeter = null;
 let poseTracker = null;
 let poseVideoElement = null;
 let poseFrameTimer = 0;
 const POSE_FRAME_INTERVAL_MS = qualityProfile.id === "compact" ? 125 : qualityProfile.id === "balanced" ? 95 : 72;
-const POSE_CONNECTIONS_LOCAL = [
-  [11, 12],
-  [11, 13],
-  [13, 15],
-  [15, 17],
-  [15, 19],
-  [15, 21],
-  [17, 19],
-  [12, 14],
-  [14, 16],
-  [16, 18],
-  [16, 20],
-  [16, 22],
-  [18, 20],
-  [11, 23],
-  [12, 24],
-  [23, 24],
-  [23, 25],
-  [25, 27],
-  [27, 29],
-  [29, 31],
-  [27, 31],
-  [24, 26],
-  [26, 28],
-  [28, 30],
-  [30, 32],
-  [28, 32],
-  [0, 11],
-  [0, 12],
-];
-const POSE_NODE_IDS = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
-const POSE_DETAIL_NODE_IDS = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
-const POSE_LEFT_IDS = new Set([1, 2, 3, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31]);
-const POSE_RIGHT_IDS = new Set([4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32]);
-const POSE_CORE_IDS = new Set([0, 11, 12, 23, 24]);
-
-const SHOW_PRESETS = {
-  auto: {
-    label: "自动巡演",
-    steps: [
-      { label: "霓虹爱心", theme: "neon", background: "nebula", model: "heart", camera: "front", duration: 9500 },
-      {
-        label: "玫瑰舞台",
-        theme: "rose",
-        background: "stage",
-        model: "flower",
-        camera: "close",
-        modelBrightness: 1.08,
-        backgroundBrightness: 1.18,
-        duration: 10500,
-      },
-      {
-        label: "电紫土星",
-        theme: "violet",
-        background: "minimal",
-        model: "saturn",
-        camera: "left",
-        modelBrightness: 1.12,
-        backgroundBrightness: 0.9,
-        duration: 9500,
-      },
-      {
-        label: "夜空烟花",
-        theme: "laser",
-        background: "fireworks",
-        model: "fireworks",
-        camera: "wide",
-        burst: true,
-        duration: 11000,
-      },
-    ],
-  },
-  romance: {
-    label: "玫瑰告白",
-    steps: [
-      {
-        label: "玫红花朵",
-        theme: "rose",
-        background: "stage",
-        model: "flower",
-        camera: "close",
-        modelBrightness: 1.06,
-        backgroundBrightness: 1.12,
-        duration: 11500,
-      },
-      {
-        label: "文字告白",
-        theme: "gold",
-        background: "nebula",
-        model: "text",
-        text: "LOVE",
-        camera: "front",
-        modelBrightness: 1.1,
-        duration: 10500,
-      },
-      {
-        label: "暖光爱心",
-        theme: "gold",
-        background: "minimal",
-        model: "heart",
-        camera: "low",
-        backgroundBrightness: 0.88,
-        duration: 9500,
-      },
-    ],
-  },
-  club: {
-    label: "夜场烟花",
-    steps: [
-      {
-        label: "激光爱心",
-        theme: "laser",
-        background: "stage",
-        model: "heart",
-        camera: "front",
-        backgroundBrightness: 1.22,
-        burst: true,
-        duration: 8500,
-      },
-      {
-        label: "电紫土星",
-        theme: "violet",
-        background: "nebula",
-        model: "saturn",
-        camera: "right",
-        modelBrightness: 1.18,
-        duration: 8500,
-      },
-      {
-        label: "爆场烟花",
-        theme: "laser",
-        background: "fireworks",
-        model: "fireworks",
-        camera: "wide",
-        backgroundBrightness: 1.3,
-        burst: true,
-        duration: 12000,
-      },
-    ],
-  },
-  gallery: {
-    label: "图形展台",
-    steps: [
-      {
-        label: "图片点云",
-        theme: "ice",
-        background: "minimal",
-        model: "image",
-        camera: "front",
-        imageBrightness: 3.0,
-        imageSize: 1,
-        duration: 10500,
-      },
-      {
-        label: "3D 点云",
-        theme: "blackGold",
-        background: "stage",
-        model: "mesh",
-        camera: "wide",
-        modelBrightness: 1.15,
-        duration: 10500,
-      },
-      {
-        label: "文字陈列",
-        theme: "aurora",
-        background: "nebula",
-        model: "text",
-        text: "PARTICLE",
-        camera: "front",
-        duration: 9500,
-      },
-      { label: "土星陈列", theme: "gold", background: "minimal", model: "saturn", camera: "top", duration: 9000 },
-    ],
-  },
-  ...Object.fromEntries(
-    SHOW_PRESET_LIBRARY.map((preset) => [
-      preset.id,
-      {
-        label: preset.label,
-        steps: preset.steps,
-      },
-    ]),
-  ),
-};
-
 ui.setShowPresetOptions(showPresetOptionList());
-
-const CUSTOM_SHOW_STORAGE_KEY = "customShowPreset";
-const SHOW_MODELS = new Set(["heart", "flower", "saturn", "fireworks", "ring", "cake", "balloons", "text", "pose", "image", "mesh"]);
-const SHOW_BACKGROUNDS = new Set(["nebula", "stage", "minimal", "fireworks", "aurora", "lattice", "sunset"]);
-const SHOW_THEMES = new Set(THEMES.map((theme) => theme.id));
-const CAMERA_SHOTS = {
-  front: { position: [0, 1.0, 8.2], target: [0, 0, 0] },
-  close: { position: [0, 0.72, 5.35], target: [0, 0.08, 0] },
-  wide: { position: [0, 1.2, 10.7], target: [0, 0, 0] },
-  left: { position: [-5.25, 1.25, 6.45], target: [0, 0.05, 0] },
-  right: { position: [5.25, 1.25, 6.45], target: [0, 0.05, 0] },
-  top: { position: [0, 7.35, 4.55], target: [0, 0.05, 0] },
-  low: { position: [0, -0.95, 6.35], target: [0, 0.1, 0] },
-};
-const DEFAULT_CUSTOM_SHOW = {
-  label: "自定义编排",
-  steps: [
-    {
-      label: "开场爱心",
-      theme: "neon",
-      background: "nebula",
-      model: "heart",
-      camera: "front",
-      modelBrightness: 1.06,
-      backgroundBrightness: 1.08,
-      duration: 9000,
-    },
-    {
-      label: "近景花朵",
-      theme: "rose",
-      background: "stage",
-      model: "flower",
-      camera: "close",
-      modelBrightness: 1.08,
-      backgroundBrightness: 1.2,
-      duration: 10000,
-    },
-    {
-      label: "烟花收尾",
-      theme: "laser",
-      background: "fireworks",
-      model: "fireworks",
-      camera: "wide",
-      backgroundBrightness: 1.25,
-      burst: true,
-      duration: 11000,
-    },
-  ],
-};
-
 const state = {
   model: "heart",
   theme: initialTheme,
@@ -415,6 +242,7 @@ const state = {
   modelBrightness: ui.getModelBrightness(),
   modelSize: ui.getModelSize(),
   meshOptions: ui.getMeshOptions(),
+  motionOptions: ui.getMotionOptions(),
   poseOptions: ui.getPoseOptions(),
   imageBrightness: ui.getImageBrightness(),
   imageSize: ui.getImageSize(),
@@ -446,6 +274,11 @@ const state = {
   cameraReady: false,
   poseVideoActive: false,
   poseProcessingVideo: false,
+  poseVideoRetargetReady: false,
+  poseVideoRetargetActive: false,
+  poseVideoRetargetFrames: 0,
+  poseVideoRetargetReason: "",
+  poseVideoRetargetMatchedBones: 0,
   poseLastFrameAt: 0,
   poseResultFrames: 0,
   poseVideoFrames: 0,
@@ -485,6 +318,9 @@ const state = {
   audioLevel: 0,
   beatPulse: 0,
   audioMotion: null,
+  safetyMode: readBooleanStorage("safetyMode"),
+  healthLastUpdate: 0,
+  resourceFailures: 0,
   audioRig: {
     scale: 1,
     x: 0,
@@ -516,7 +352,33 @@ const state = {
 const performanceStats = {
   frames: 0,
   lastUpdate: performance.now(),
+  fps: 0,
 };
+
+function readBooleanStorage(key) {
+  try {
+    return localStorage.getItem(key) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function writeBooleanStorage(key, value) {
+  try {
+    localStorage.setItem(key, value ? "true" : "false");
+  } catch {
+    // Local storage can be unavailable in strict privacy modes.
+  }
+}
+
+function hasWebGLSupport() {
+  try {
+    const testCanvas = document.createElement("canvas");
+    return Boolean(testCanvas.getContext("webgl2") || testCanvas.getContext("webgl") || testCanvas.getContext("experimental-webgl"));
+  } catch {
+    return false;
+  }
+}
 
 particles.customText = state.customText;
 particles.textFont = state.textFont;
@@ -527,6 +389,8 @@ syncParticleDrawRange();
 syncParticleBrightnessUniforms();
 renderShowComposer();
 installShowPresetApi();
+ui.setSafetyModeActive(state.safetyMode);
+updateHealthPanel(true);
 initCameraTracking();
 animate();
 
@@ -792,6 +656,15 @@ modelSize?.addEventListener("input", () => {
   state.modelSize = ui.getModelSize();
 });
 
+safetyModeBtn?.addEventListener("click", () => {
+  setSafetyMode(!state.safetyMode);
+});
+
+healthRefreshBtn?.addEventListener("click", () => {
+  updateHealthPanel(true);
+  showHeldDiagnostic("健康检查已刷新", 2600);
+});
+
 imageBrightness?.addEventListener("input", () => {
   state.imageBrightness = ui.getImageBrightness();
   syncParticleBrightnessUniforms();
@@ -802,18 +675,48 @@ imageSize?.addEventListener("input", () => {
   syncParticleDrawRange();
 });
 
-for (const input of [meshDensity, meshSize, meshDepth, meshSpread]) {
+for (const input of [meshDensity, meshSize, meshDepth, meshSpread, meshAnimationSpeed, meshAnimationFollow, meshYaw, meshGround]) {
   input?.addEventListener("input", () => {
     state.meshOptions = ui.getMeshOptions();
     if (input === meshDensity) {
       syncParticleDrawRange();
       return;
     }
+    if (input === meshAnimationSpeed || input === meshAnimationFollow) {
+      updateMeshAnimationPlayback();
+      return;
+    }
     scheduleMeshOptionsUpdate();
   });
 }
 
-for (const input of [poseDensity, poseFollow, poseAura]) {
+for (const input of [meshAnimationEnabled, meshAnimationLoop]) {
+  input?.addEventListener("change", () => {
+    state.meshOptions = ui.getMeshOptions();
+    updateMeshAnimationPlayback();
+  });
+}
+
+meshAutoCenter?.addEventListener("change", () => {
+  state.meshOptions = ui.getMeshOptions();
+  scheduleMeshOptionsUpdate();
+});
+
+for (const input of [motionDensity, motionSpeed, motionSize]) {
+  input?.addEventListener("input", () => {
+    state.motionOptions = ui.getMotionOptions();
+    if (input === motionDensity) {
+      syncParticleDrawRange();
+    }
+  });
+}
+
+motionLoop?.addEventListener("change", () => {
+  state.motionOptions = ui.getMotionOptions();
+  updateBvhPlaybackOptions();
+});
+
+for (const input of [poseDensity, poseFollow, poseAura, poseRetargetSmoothing]) {
   input?.addEventListener("input", () => {
     state.poseOptions = ui.getPoseOptions();
     if (input === poseDensity) {
@@ -822,13 +725,35 @@ for (const input of [poseDensity, poseFollow, poseAura]) {
   });
 }
 
+poseRetargetEnabled?.addEventListener("change", () => {
+  state.poseOptions = ui.getPoseOptions();
+  if (state.poseOptions.retargetEnabled && state.poseVideoActive) {
+    const prepared = preparePoseVideoRetargeter();
+    state.poseVideoRetargetReady = prepared.ok;
+    if (prepared.ok) {
+      showHeldDiagnostic(`视频驱动 3D 已开启，匹配 ${prepared.matchedBones ?? 0} 根骨骼`, 7000);
+    } else {
+      showHeldDiagnostic(`视频驱动 3D 未匹配：${prepared.reason}`, 8000);
+    }
+  } else {
+    stopPoseVideoRetargeter(true);
+    state.poseVideoRetargetReason = "视频驱动 3D 已关闭";
+    if (state.poseVideoActive && particles.customPosePoints?.length) {
+      selectModel("pose", true);
+    }
+  }
+});
+
 micToggleBtn.addEventListener("click", async () => {
   try {
     await useMicrophone(audioReactor);
     ui.setAudioActive("mic");
+    updateHealthPanel(true);
   } catch (error) {
     console.error(error);
+    state.resourceFailures += 1;
     ui.setDiagnostic(`麦克风不可用：${error?.message ?? "unknown error"}`);
+    updateHealthPanel(true);
   }
 });
 
@@ -838,9 +763,12 @@ audioFileInput.addEventListener("change", async () => {
   try {
     await useAudioFile(audioReactor, file);
     ui.setAudioActive("file");
+    updateHealthPanel(true);
   } catch (error) {
     console.error(error);
+    state.resourceFailures += 1;
     ui.setDiagnostic(`音频文件不可用：${error?.message ?? "unknown error"}`);
+    updateHealthPanel(true);
   }
 });
 
@@ -883,23 +811,37 @@ meshFileInput?.addEventListener("change", async () => {
   const [file] = meshFileInput.files ?? [];
   if (!file) return;
   try {
-    ui.setImportProgress({ active: true, value: 0.06, label: "准备读取 GLB" });
-    showHeldDiagnostic("正在读取 GLB 并采样模型表面", 60000);
+    if (/\.fbx$/i.test(file.name)) {
+      throw new Error("FBX 不建议直接导入，请先用 Blender 或动捕工具导出为 GLB/glTF 或 BVH");
+    }
+    ui.setImportProgress({ active: true, value: 0.06, label: "准备读取 GLB/glTF" });
+    showHeldDiagnostic("正在读取 AI 动捕角色文件；带内置动画的 GLB/glTF 会自动播放并转成粒子", 60000);
     state.meshOptions = ui.getMeshOptions();
     const meshSampleTarget = Math.min(
       qualityProfile.maxMeshSamples ?? 360000,
       Math.round(particles.count * (qualityProfile.meshSampleMultiplier ?? 1) * THREE.MathUtils.clamp(state.meshOptions.density, 0.25, 1.2)),
     );
-    const points = await createMeshPointCloud(file, meshSampleTarget, (progress) => {
-      ui.setImportProgress({ active: true, ...progress });
+    const source = await createMeshParticleSource(file, meshSampleTarget, {
+      animatedSampleLimit: currentAnimatedMeshSampleLimit(meshSampleTarget),
+      staticSampleLimit: qualityProfile.maxMeshSamples ?? 980000,
+      onProgress: (progress) => {
+        ui.setImportProgress({ active: true, ...progress });
+      },
     });
     ui.setImportProgress({ active: true, value: 0.94, label: "正在生成 3D 粒子" });
-    meshBasePoints = points;
-    setMeshPoints(particles, transformMeshPoints(meshBasePoints, state.meshOptions));
+    stopPoseVideoRetargeter(false);
+    stopMeshAnimationSource();
+    meshAnimationSource = source;
+    meshBasePoints = source.points;
+    meshTransformedPoints = transformMeshPoints(meshBasePoints, state.meshOptions, meshTransformedPoints);
+    updateMeshAnimationPlayback();
+    setMeshPoints(particles, meshTransformedPoints, meshAnimationSource.hasAnimation ? currentVisibleParticleCount("mesh") : undefined);
     selectModel("mesh", true);
     syncParticleDrawRange();
-    ui.setImportProgress({ active: true, value: 1, label: "GLB 导入完成" });
-    showHeldDiagnostic(`GLB 模型已生成 ${points.length} 个 3D 表面采样点`, 8000);
+    const animationLabel = source.hasAnimation ? `，已播放 ${source.animations.length} 段内置动画并转为动态粒子` : "";
+    const textureLabel = source.texturedSamples > source.points.length * 0.05 ? "，已还原贴图颜色" : "";
+    ui.setImportProgress({ active: true, value: 1, label: "3D 模型导入完成" });
+    showHeldDiagnostic(`GLB/glTF 已生成 ${source.points.length} 个表面采样点${textureLabel}${animationLabel}`, 10000);
     window.setTimeout(() => ui.setImportProgress({ active: false }), 900);
   } catch (error) {
     console.error(error);
@@ -910,6 +852,41 @@ meshFileInput?.addEventListener("change", async () => {
   }
 });
 
+motionFileInput?.addEventListener("change", async () => {
+  const [file] = motionFileInput.files ?? [];
+  if (!file) return;
+  try {
+    if (/\.fbx$/i.test(file.name)) {
+      throw new Error("FBX 不建议直接导入，请先用 Blender 或动捕工具导出为 GLB/glTF 或 BVH");
+    }
+    ui.setImportProgress({ active: true, value: 0.08, label: "正在读取 BVH 动作" });
+    showHeldDiagnostic("正在解析 BVH 动作；如果当前 3D 模型带骨骼，会先尝试驱动它", 60000);
+    state.motionOptions = ui.getMotionOptions();
+    const result = await loadBvhMotion(file, (progress) => {
+      ui.setImportProgress({ active: true, ...progress });
+    });
+    const retargeted = tryApplyBvhToMesh(result, file.name);
+    if (retargeted.ok) {
+      selectModel("mesh", true);
+      ui.setImportProgress({ active: true, value: 1, label: "BVH 已驱动当前模型" });
+      showHeldDiagnostic(`BVH 已匹配当前 GLB/glTF 骨骼，匹配 ${retargeted.matchedBones} 根骨骼，正在转为动态粒子`, 10000);
+    } else {
+      stopPoseVideo();
+      startBvhParticleMotion(result, file.name);
+      selectModel("pose", true);
+      ui.setImportProgress({ active: true, value: 1, label: "BVH 粒子骨架已开始驱动" });
+      showHeldDiagnostic(`BVH 匹配不足，已回退为 3D 粒子动作骨架；${retargeted.reason}`, 11000);
+    }
+    window.setTimeout(() => ui.setImportProgress({ active: false }), 900);
+  } catch (error) {
+    console.error(error);
+    ui.setImportProgress({ active: true, value: 1, label: "加载失败，请重新导入", error: true });
+    showHeldDiagnostic(`BVH 动作加载失败，请重新导入：${error?.message ?? "unknown error"}`, 12000);
+  } finally {
+    motionFileInput.value = "";
+  }
+});
+
 poseVideoInput?.addEventListener("change", async () => {
   const [file] = poseVideoInput.files ?? [];
   if (!file) return;
@@ -917,10 +894,19 @@ poseVideoInput?.addEventListener("change", async () => {
     ui.setImportProgress({ active: true, value: 0.06, label: "准备读取姿态视频" });
     showHeldDiagnostic("正在加载姿态视频，首次使用会加载 MediaPipe Pose 模型", 60000);
     await startPoseVideo(file);
-    selectModel("pose", true);
-    ui.setImportProgress({ active: true, value: 1, label: "姿态视频已开始驱动" });
-    showHeldDiagnostic("姿态视频已开始驱动粒子人体，可切到姿态模型观看舞动骨架", 9000);
-    window.setTimeout(() => ui.setImportProgress({ active: false }), 900);
+    if (state.poseVideoRetargetReady) {
+      selectModel("mesh", true);
+      const matchedBones = state.poseVideoRetargetMatchedBones || poseVideoRetargeter?.matchedBones || 0;
+      ui.setImportProgress({ active: true, value: 1, label: "导入成功，已匹配 3D 人物" });
+      showHeldDiagnostic(`导入成功：姿态视频已匹配当前 3D 人物，匹配 ${matchedBones} 根骨骼，已开启比例自适应和脚底稳定`, 10000);
+      window.setTimeout(() => ui.setImportProgress({ active: false }), 1200);
+    } else {
+      selectModel("pose", true);
+      const reason = state.poseVideoRetargetReason || "没有找到可驱动的 3D 骨骼模型";
+      ui.setImportProgress({ active: true, value: 1, label: "导入失败，已回退为粒子骨架", error: true });
+      showHeldDiagnostic(`导入失败：${reason}。已回退成原粒子骨架。`, 12000);
+      window.setTimeout(() => ui.setImportProgress({ active: false }), 1800);
+    }
   } catch (error) {
     console.error(error);
     ui.setImportProgress({ active: true, value: 1, label: "加载失败，请重新导入", error: true });
@@ -934,6 +920,7 @@ audioStopBtn.addEventListener("click", () => {
   stopAudioSource(audioReactor);
   ui.setAudioActive("off");
   ui.updateAudioLevel(0);
+  updateHealthPanel(true);
 });
 
 sensitivity.addEventListener("input", () => {
@@ -1050,50 +1037,53 @@ async function initCameraTracking() {
     state.cameraReady = true;
     processVideoFrame();
     ui.setStatus("摄像头已开启，等待双手入镜", "ready");
+    updateHealthPanel(true);
   } catch (error) {
     console.warn(error);
     state.lastErrorMessage = error?.message ?? "unknown error";
+    state.resourceFailures += 1;
     ui.setStatus("摄像头或手势模型不可用，可用鼠标预览粒子", "error");
     ui.setDiagnostic(`错误：${state.lastErrorMessage}`);
+    updateHealthPanel(true);
   }
 }
 
 async function startPoseVideo(file) {
+  stopBvhParticleMotion();
   stopPoseVideo();
+  stopPoseVideoRetargeter(false);
   ui.setImportProgress({ active: true, value: 0.16, label: "正在加载 Pose 模型" });
   poseTracker = await createPoseTracker();
   state.poseOptions = ui.getPoseOptions();
   setPosePoints(particles, createFallbackPosePointCloud(currentPoseSampleTarget()), currentVisibleParticleCount("pose"));
-  poseVideoElement = document.createElement("video");
-  poseVideoElement.muted = true;
-  poseVideoElement.loop = true;
-  poseVideoElement.playsInline = true;
-  poseVideoElement.preload = "auto";
-  poseVideoElement.src = URL.createObjectURL(file);
-  poseVideoElement.style.display = "none";
-  document.body.appendChild(poseVideoElement);
-
-  await waitForVideoMetadata(poseVideoElement);
+  const preparedRetarget = preparePoseVideoRetargeter();
+  state.poseVideoRetargetReady = preparedRetarget.ok;
+  poseVideoElement = await createPoseVideoElement(file);
   ui.setImportProgress({ active: true, value: 0.36, label: "正在启动姿态视频" });
   await poseVideoElement.play();
   state.poseVideoActive = true;
   state.poseLastFrameAt = 0;
   state.poseResultFrames = 0;
   state.poseVideoFrames = 0;
+  state.poseVideoRetargetFrames = 0;
   schedulePoseVideoFrame();
 }
 
 function stopPoseVideo() {
   state.poseVideoActive = false;
   state.poseProcessingVideo = false;
+  state.poseVideoRetargetReady = false;
+  state.poseVideoRetargetActive = false;
+  state.poseVideoRetargetFrames = 0;
+  state.poseVideoRetargetReason = "";
+  state.poseVideoRetargetMatchedBones = 0;
+  stopPoseVideoRetargeter(false);
   if (poseFrameTimer) {
     window.clearTimeout(poseFrameTimer);
     poseFrameTimer = 0;
   }
   if (poseVideoElement) {
-    poseVideoElement.pause();
-    if (poseVideoElement.src) URL.revokeObjectURL(poseVideoElement.src);
-    poseVideoElement.remove();
+    disposePoseVideoElement(poseVideoElement);
     poseVideoElement = null;
   }
 }
@@ -1114,12 +1104,21 @@ async function createPoseTracker() {
     selfieMode: false,
   });
   tracker.onResults((results) => {
-    const points = createPosePointCloud(results.poseLandmarks, currentPoseSampleTarget());
-    if (!points.length) return;
-    setPosePoints(particles, points, currentVisibleParticleCount("pose"));
-    state.poseLastFrameAt = performance.now();
+    const landmarks = results.poseLandmarks;
+    if (!landmarks?.length) return;
+    const now = performance.now();
+    const retargeted = updatePoseVideoRetarget(landmarks, now);
+    if (!retargeted && state.model === "pose") {
+      const points = createPosePointCloud(landmarks, currentPoseSampleTarget());
+      if (!points.length) return;
+      setPosePoints(particles, points, currentVisibleParticleCount("pose"));
+    }
+    state.poseLastFrameAt = now;
     state.poseResultFrames += 1;
     if (state.model === "pose") {
+      syncParticleDrawRange();
+      syncParticleBrightnessUniforms();
+    } else if (retargeted && state.model === "mesh") {
       syncParticleDrawRange();
       syncParticleBrightnessUniforms();
     }
@@ -1142,7 +1141,8 @@ function schedulePoseVideoFrame() {
 
 async function processPoseVideoFrame() {
   if (!state.poseVideoActive || !poseTracker || !poseVideoElement) return;
-  if (state.model !== "pose") {
+  const shouldProcess = state.model === "pose" || (state.model === "mesh" && state.poseVideoRetargetReady);
+  if (!shouldProcess) {
     schedulePoseVideoFrame();
     return;
   }
@@ -1159,7 +1159,7 @@ async function processPoseVideoFrame() {
       ui.setImportProgress({
         active: age > 900,
         value: 0.62,
-        label: age > 900 ? "正在寻找人体姿态" : `姿态视频驱动中 ${state.poseResultFrames} 帧`,
+        label: age > 900 ? "正在寻找人体姿态" : state.poseVideoRetargetActive ? `视频驱动 3D 中 ${state.poseVideoRetargetFrames} 帧` : `姿态视频驱动中 ${state.poseResultFrames} 帧`,
         indeterminate: true,
       });
     } catch (error) {
@@ -1170,29 +1170,6 @@ async function processPoseVideoFrame() {
     }
   }
   schedulePoseVideoFrame();
-}
-
-function waitForVideoMetadata(videoElement) {
-  return new Promise((resolve, reject) => {
-    if (videoElement.readyState >= 1) {
-      resolve();
-      return;
-    }
-    const cleanup = () => {
-      videoElement.removeEventListener("loadedmetadata", handleLoaded);
-      videoElement.removeEventListener("error", handleError);
-    };
-    const handleLoaded = () => {
-      cleanup();
-      resolve();
-    };
-    const handleError = () => {
-      cleanup();
-      reject(new Error("video metadata unavailable"));
-    };
-    videoElement.addEventListener("loadedmetadata", handleLoaded, { once: true });
-    videoElement.addEventListener("error", handleError, { once: true });
-  });
 }
 
 function resolveHandsConstructor(module) {
@@ -1506,6 +1483,8 @@ function animate() {
   state.beatPulse = audio.beat;
   ui.updateAudioLevel(audio);
   particles.material.uniforms.uTime.value = elapsed;
+  updateMeshAnimation(delta, now);
+  updateBvhParticleMotion(delta, now);
   detectHands(now);
   updatePointingBlend(now);
   updateFireworkExplosion(now);
@@ -1884,13 +1863,6 @@ function getActiveShowPreset() {
   return SHOW_PRESETS[state.showPreset] ?? SHOW_PRESETS.auto;
 }
 
-function showPresetOptionList() {
-  return [
-    ...Object.entries(SHOW_PRESETS).map(([id, preset]) => ({ id, label: preset.label })),
-    { id: "custom", label: "自定义编排" },
-  ];
-}
-
 function ensureEditingCustomPreset() {
   if (state.showPreset !== "custom") {
     state.customShowPreset = normalizeShowPreset(cloneShowPreset(getActiveShowPreset()), "自定义编排");
@@ -1917,6 +1889,24 @@ function importCustomShowPreset(input, message = "自定义演出已导入") {
   renderShowComposer();
   ui.setShowJson(JSON.stringify(state.customShowPreset, null, 2));
   showHeldDiagnostic(message, 6000);
+}
+
+function loadCustomShowPreset() {
+  try {
+    const raw = localStorage.getItem(CUSTOM_SHOW_STORAGE_KEY);
+    return raw ? normalizeShowPreset(JSON.parse(raw), "自定义编排") : normalizeShowPreset(DEFAULT_CUSTOM_SHOW);
+  } catch {
+    return normalizeShowPreset(DEFAULT_CUSTOM_SHOW);
+  }
+}
+
+function persistCustomShowPreset() {
+  state.customShowPreset = normalizeShowPreset(state.customShowPreset, "自定义编排");
+  try {
+    localStorage.setItem(CUSTOM_SHOW_STORAGE_KEY, JSON.stringify(state.customShowPreset));
+  } catch {
+    // Local storage can be unavailable in strict privacy modes.
+  }
 }
 
 function installShowPresetApi() {
@@ -1981,118 +1971,6 @@ function captureCurrentShowStep() {
   };
 }
 
-function normalizeShowPreset(input, fallbackLabel = "自定义编排") {
-  const source = Array.isArray(input) ? { label: fallbackLabel, steps: input } : input;
-  const rawSteps = Array.isArray(source?.steps)
-    ? source.steps
-    : source && typeof source === "object" && source.model
-      ? [source]
-      : DEFAULT_CUSTOM_SHOW.steps;
-  const steps = rawSteps.slice(0, 80).map((step, index) => normalizeShowStep(step, index));
-  return {
-    label: normalizeShowPresetLabel(source?.label ?? fallbackLabel),
-    steps: steps.length > 0 ? steps : DEFAULT_CUSTOM_SHOW.steps.map((step, index) => normalizeShowStep(step, index)),
-  };
-}
-
-function normalizeShowStep(step = {}, index = 0) {
-  const duration = normalizeShowDuration(step.duration ?? step.seconds);
-  return {
-    label: normalizeShowLabel(step.label, index),
-    duration,
-    theme: SHOW_THEMES.has(step.theme) ? step.theme : "neon",
-    background: SHOW_BACKGROUNDS.has(step.background) ? step.background : "nebula",
-    model: SHOW_MODELS.has(step.model) ? step.model : "heart",
-    text: normalizeShowText(step.text ?? "LOVE"),
-    camera: normalizeCameraSpec(step.camera),
-    cameraDuration: normalizeShowDuration(step.cameraDuration ?? 1400, 300, 6000),
-    modelBrightness: normalizeShowRatio(step.modelBrightness, 1, 0.45, 2.2),
-    backgroundBrightness: normalizeShowRatio(step.backgroundBrightness, 1, 0.35, 2.2),
-    imageBrightness: normalizeShowRatio(step.imageBrightness, 2.8, 0.6, 4.8),
-    imageSize: normalizeShowRatio(step.imageSize, 1, 0.45, 1),
-    burst: normalizeShowBoolean(step.burst),
-    freeze: normalizeShowBoolean(step.freeze),
-  };
-}
-
-function normalizeShowDuration(value, min = 2000, max = 120000) {
-  const numeric = Number(value);
-  const milliseconds = numeric > 0 && numeric <= 120 ? numeric * 1000 : numeric;
-  return Math.round(THREE.MathUtils.clamp(Number.isFinite(milliseconds) ? milliseconds : 10000, min, max));
-}
-
-function normalizeShowRatio(value, fallback, min, max) {
-  if (value === undefined || value === null || value === "") return fallback;
-  const numeric = Number(String(value).replace("%", ""));
-  const ratio = numeric > 10 ? numeric / 100 : numeric;
-  return THREE.MathUtils.clamp(Number.isFinite(ratio) ? ratio : fallback, min, max);
-}
-
-function normalizeShowBoolean(value) {
-  if (typeof value === "string") {
-    return value === "1" || value.toLowerCase() === "true" || value === "是";
-  }
-  return Boolean(value);
-}
-
-function normalizeShowPresetLabel(label) {
-  const trimmed = String(label ?? "").trim();
-  return trimmed.length > 0 ? trimmed.slice(0, 24) : "自定义编排";
-}
-
-function normalizeShowLabel(label, index) {
-  const trimmed = String(label ?? "").trim();
-  return trimmed.length > 0 ? trimmed.slice(0, 18) : `片段 ${index + 1}`;
-}
-
-function normalizeShowText(text) {
-  const trimmed = String(text ?? "").trim();
-  return trimmed.length > 0 ? trimmed.slice(0, 18) : "LOVE";
-}
-
-function normalizeCameraSpec(cameraSpec) {
-  if (!cameraSpec || cameraSpec === "hold") return "hold";
-  if (typeof cameraSpec === "string") {
-    return CAMERA_SHOTS[cameraSpec] ? cameraSpec : "hold";
-  }
-  const position = vectorArray(cameraSpec.position);
-  const target = vectorArray(cameraSpec.target);
-  if (!position || !target) return "hold";
-  return { position, target };
-}
-
-function vectorArray(value) {
-  if (!Array.isArray(value) || value.length < 3) return null;
-  const vector = value.slice(0, 3).map(Number);
-  return vector.every(Number.isFinite) ? vector : null;
-}
-
-function cloneShowPreset(preset) {
-  return JSON.parse(JSON.stringify(preset));
-}
-
-function loadCustomShowPreset() {
-  try {
-    const raw = localStorage.getItem(CUSTOM_SHOW_STORAGE_KEY);
-    return raw ? normalizeShowPreset(JSON.parse(raw), "自定义编排") : normalizeShowPreset(DEFAULT_CUSTOM_SHOW);
-  } catch {
-    return normalizeShowPreset(DEFAULT_CUSTOM_SHOW);
-  }
-}
-
-function persistCustomShowPreset() {
-  state.customShowPreset = normalizeShowPreset(state.customShowPreset, "自定义编排");
-  try {
-    localStorage.setItem(CUSTOM_SHOW_STORAGE_KEY, JSON.stringify(state.customShowPreset));
-  } catch {
-    // Local storage can be unavailable in strict privacy modes.
-  }
-}
-
-function nextStepLabel(label, count) {
-  const base = String(label ?? "片段").replace(/\s+\d+$/, "").slice(0, 14).trim() || "片段";
-  return `${base} ${count}`;
-}
 
 function setModelBrightnessRatio(value) {
   setRangeRatio(modelBrightness, value);
@@ -2333,7 +2211,8 @@ function selectModel(model, forceRefresh = false) {
     particles.customText = state.customText;
     setCustomText(particles, state.customText, state.textFont);
   } else if (normalized === "mesh" && meshBasePoints.length) {
-    setMeshPoints(particles, transformMeshPoints(meshBasePoints, state.meshOptions));
+    meshTransformedPoints = transformMeshPoints(meshBasePoints, state.meshOptions, meshTransformedPoints);
+    setMeshPoints(particles, meshTransformedPoints, meshAnimationSource?.hasAnimation ? currentVisibleParticleCount("mesh") : undefined);
   } else {
     setParticleTargets(particles, normalized, normalized === "pose" ? { writeCount: currentVisibleParticleCount("pose") } : undefined);
   }
@@ -2356,21 +2235,24 @@ function syncParticleDrawRange() {
 }
 
 function currentVisibleParticleCount(model = state.model) {
+  const safetyRatio = state.safetyMode ? 0.58 : 1;
   if (model === "mesh") {
     const density = THREE.MathUtils.clamp(state.meshOptions?.density ?? 1, 0.25, 1.2);
-    return Math.min(particles.count, Math.max(26000, Math.round(particles.count * Math.min(1, density))));
+    const liveLimit = meshAnimationSource?.hasAnimation || meshAnimationSource?.poseVideoDriven ? meshBasePoints.length || particles.count : particles.count;
+    return Math.min(particles.count, liveLimit, Math.max(22000, Math.round(particles.count * Math.min(1, density) * safetyRatio)));
   }
   if (model === "pose") {
-    const density = THREE.MathUtils.clamp(state.poseOptions?.density ?? 1, 0.35, 1.6);
+    const densitySource = bvhMotionSource ? state.motionOptions?.density : state.poseOptions?.density;
+    const density = THREE.MathUtils.clamp(densitySource ?? 1, 0.35, 1.8);
     const ratio = (qualityProfile.id === "compact" ? 0.16 : qualityProfile.id === "balanced" ? 0.2 : 0.24) * density;
-    return Math.min(particles.count, Math.max(26000, Math.round(particles.count * ratio)));
+    return Math.min(particles.count, Math.max(18000, Math.round(particles.count * ratio * safetyRatio)));
   }
   if (model === "image") {
     const size = THREE.MathUtils.clamp(state.imageSize ?? 1, 0.45, 1);
     const density = THREE.MathUtils.clamp(size ** 1.42, 0.32, 1);
-    return Math.max(12000, Math.round(particles.count * density));
+    return Math.max(12000, Math.round(particles.count * density * safetyRatio));
   }
-  return particles.count;
+  return Math.max(26000, Math.round(particles.count * safetyRatio));
 }
 
 function currentPoseSampleTarget() {
@@ -2389,24 +2271,60 @@ function scheduleMeshOptionsUpdate() {
   if (meshOptionsFrame) return;
   meshOptionsFrame = requestAnimationFrame(() => {
     meshOptionsFrame = 0;
-    setMeshPoints(particles, transformMeshPoints(meshBasePoints, state.meshOptions));
+    meshTransformedPoints = transformMeshPoints(meshBasePoints, state.meshOptions, meshTransformedPoints);
+    setMeshPoints(particles, meshTransformedPoints, meshAnimationSource?.hasAnimation ? currentVisibleParticleCount("mesh") : undefined);
     syncParticleDrawRange();
     syncParticleBrightnessUniforms();
   });
 }
 
-function transformMeshPoints(points, options = {}) {
+function transformMeshPoints(points, options = {}, target = []) {
   if (!Array.isArray(points) || points.length === 0) return points;
   const size = THREE.MathUtils.clamp(options.size ?? 1, 0.25, 2.6);
   const depth = THREE.MathUtils.clamp(options.depth ?? 1, 0.2, 2.4);
   const spread = THREE.MathUtils.clamp(options.spread ?? 1, 0, 2);
-  return points.map((point) => ({
-    ...point,
-    x: (point.baseX ?? point.x) * size,
-    y: (point.baseY ?? point.y) * size,
-    z: (point.baseZ ?? point.z ?? 0) * size * depth,
-    jitter: (point.baseJitter ?? 0.004) * spread,
-  }));
+  const yaw = THREE.MathUtils.clamp(options.yaw ?? 0, -Math.PI, Math.PI);
+  const groundOffset = THREE.MathUtils.clamp(options.groundOffset ?? 0, -1.2, 1.2);
+  const cosYaw = Math.cos(yaw);
+  const sinYaw = Math.sin(yaw);
+  const center = options.autoCenter ? meshPointCloudCenter(points) : null;
+  target.length = points.length;
+  for (let i = 0; i < points.length; i += 1) {
+    const point = points[i];
+    const next = target[i] ?? {};
+    const baseX = (point.baseX ?? point.x) - (center?.x ?? 0);
+    const baseY = (point.baseY ?? point.y) - (center?.y ?? 0);
+    const baseZ = (point.baseZ ?? point.z ?? 0) - (center?.z ?? 0);
+    const x = baseX * size;
+    const z = baseZ * size * depth;
+    next.x = x * cosYaw - z * sinYaw;
+    next.y = baseY * size + groundOffset;
+    next.z = x * sinYaw + z * cosYaw;
+    next.r = point.r ?? 1;
+    next.g = point.g ?? 1;
+    next.b = point.b ?? 1;
+    next.a = point.a ?? 1;
+    next.mix = point.mix;
+    next.glow = point.glow;
+    next.kind = point.kind;
+    next.jitter = (point.baseJitter ?? point.jitter ?? 0.004) * spread;
+    target[i] = next;
+  }
+  return target;
+}
+
+function meshPointCloudCenter(points) {
+  const box = new THREE.Box3();
+  const temp = new THREE.Vector3();
+  const limit = Math.min(points.length, 120000);
+  const stride = Math.max(1, Math.floor(points.length / limit));
+  for (let i = 0; i < points.length; i += stride) {
+    const point = points[i];
+    temp.set(point.baseX ?? point.x ?? 0, point.baseY ?? point.y ?? 0, point.baseZ ?? point.z ?? 0);
+    box.expandByPoint(temp);
+  }
+  if (box.isEmpty()) return new THREE.Vector3();
+  return box.getCenter(new THREE.Vector3());
 }
 
 function triggerFireworksBurst() {
@@ -2729,11 +2647,63 @@ function updatePerformanceStats(now) {
   }
 
   const fps = Math.round((performanceStats.frames * 1000) / elapsed);
+  performanceStats.fps = fps;
   performanceStats.frames = 0;
   performanceStats.lastUpdate = now;
   ui.updatePerformance({
     fps,
     particleCount: particles.visibleCount ?? particles.count,
+  });
+  updateHealthPanel();
+}
+
+function setSafetyMode(active) {
+  state.safetyMode = Boolean(active);
+  writeBooleanStorage("safetyMode", state.safetyMode);
+  ui.setSafetyModeActive(state.safetyMode);
+  if (state.safetyMode) {
+    state.showPresetActive = false;
+    ui.setShowPresetActive(false);
+    setBackgroundMode(backgroundSystem, "minimal", state.theme);
+    ui.setBackgroundActive(backgroundSystem.mode);
+    ui.saveBackgroundMode(backgroundSystem.mode);
+    setBackgroundBrightnessRatio(0.72);
+    setModelBrightnessRatio(Math.min(state.modelBrightness ?? 1, 0.95));
+    setImageBrightnessRatio(Math.min(state.imageBrightness ?? 2.8, 2.1));
+    setRangeRatio(meshDensity, 0.58);
+    setRangeRatio(meshAnimationFollow, 0.72);
+    setRangeRatio(motionDensity, 0.72);
+    setRangeRatio(poseDensity, 0.72);
+    state.pointerBoost = 0;
+    state.recoverUntil = performance.now() + 1200;
+    showHeldDiagnostic("现场安全模式已开启：降低绘制量、Bloom 和背景复杂度", 5200);
+  } else {
+    showHeldDiagnostic("现场安全模式已关闭，可继续手动调高亮度和粒子密度", 4200);
+  }
+  syncParticleDrawRange();
+  syncParticleBrightnessUniforms();
+  updateHealthPanel(true);
+}
+
+function updateHealthPanel(force = false) {
+  const now = performance.now();
+  if (!force && now - (state.healthLastUpdate ?? 0) < 1200) return;
+  state.healthLastUpdate = now;
+  const gl = renderer.getContext();
+  const webglOk = Boolean(gl && !gl.isContextLost?.());
+  const handsStatus = state.modelReady ? "ok" : state.lastErrorMessage ? "error" : "warn";
+  const cameraStatus = state.cameraReady ? "ok" : state.lastErrorMessage ? "error" : "warn";
+  const audioStatus = audioReactor.enabled ? "ok" : "warn";
+  const fps = performanceStats.fps || 0;
+  ui.updateHealth({
+    webgl: { status: webglOk ? "ok" : "error", label: webglOk ? (renderer.capabilities.isWebGL2 ? "WebGL2" : "WebGL1") : "异常" },
+    camera: { status: cameraStatus, label: state.cameraReady ? "已开启" : state.lastErrorMessage ? "不可用" : "待授权" },
+    mediapipe: { status: handsStatus, label: state.modelReady ? "Hands 已加载" : state.lastErrorMessage ? "加载失败" : "加载中" },
+    mic: { status: audioReactor.stream ? "ok" : "warn", label: audioReactor.stream ? "已开启" : "未开启" },
+    audio: { status: audioStatus, label: audioReactor.enabled ? "响应中" : "未开启" },
+    resources: { status: state.resourceFailures > 0 || state.lastErrorMessage ? "warn" : "ok", label: state.resourceFailures > 0 ? `${state.resourceFailures} 项异常` : "正常" },
+    quality: { status: state.safetyMode ? "warn" : "ok", label: `${qualityProfile.label} · ${Math.round((particles.visibleCount ?? particles.count) / 1000)}k` },
+    fps: { status: !fps ? "warn" : fps >= 45 ? "ok" : fps >= 28 ? "warn" : "error", label: fps ? `${fps} FPS` : "测量中" },
   });
 }
 
@@ -3204,144 +3174,754 @@ function weightedPickMany(candidates, count, seed) {
   return picked;
 }
 
-async function createMeshPointCloud(file, targetCount, onProgress) {
-  const url = URL.createObjectURL(file);
+function stopMeshAnimationSource() {
+  if (!meshAnimationSource) return;
+  meshAnimationSource.action?.stop();
+  meshAnimationSource.mixer?.stopAllAction?.();
+  meshAnimationSource = null;
+}
+
+function updateMeshAnimationPlayback() {
+  updateMeshAnimationPlaybackForSource(meshAnimationSource);
+}
+
+function updateMeshAnimationPlaybackForSource(source) {
+  if (!source?.hasAnimation || !source.mixer) return;
+  const enabled = Boolean(state.meshOptions?.animationEnabled);
+  const loop = state.meshOptions?.animationLoop !== false;
+  source.enabled = enabled;
+  source.mixer.timeScale = THREE.MathUtils.clamp(state.meshOptions?.animationSpeed ?? 1, 0.25, 2.2);
+  if (source.action) {
+    source.action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
+    source.action.clampWhenFinished = !loop;
+    source.action.paused = !enabled;
+    const duration = source.action.getClip()?.duration ?? 0;
+    const canResume = loop || duration <= 0 || source.action.time < duration - 0.05;
+    if (enabled && canResume && !source.action.isRunning()) {
+      source.action.play();
+    }
+  }
+}
+
+function updateMeshAnimation(delta, now) {
+  if (meshAnimationSource?.poseVideoDriven) return;
+  if (!meshAnimationSource?.hasAnimation || !meshAnimationSource.mixer) return;
+  updateMeshAnimationPlayback();
+  if (!meshAnimationSource.enabled) return;
+  meshAnimationSource.mixer.update(delta);
+  if (state.model !== "mesh") return;
+  if (now - meshAnimationSource.lastSampleAt < currentMeshAnimationFrameInterval()) return;
+  meshAnimationSource.lastSampleAt = now;
+  sampleMeshSource(meshAnimationSource);
+  meshBasePoints = meshAnimationSource.points;
+  meshTransformedPoints = transformMeshPoints(meshBasePoints, state.meshOptions, meshTransformedPoints);
+  setMeshPoints(particles, meshTransformedPoints, currentVisibleParticleCount("mesh"));
+}
+
+function currentMeshAnimationFrameInterval() {
+  const follow = THREE.MathUtils.clamp(state.meshOptions?.animationFollow ?? 1, 0.35, 1.8);
+  return Math.round(THREE.MathUtils.clamp(86 / follow, 42, 180));
+}
+
+function currentAnimatedMeshSampleLimit(targetCount) {
+  const density = THREE.MathUtils.clamp(state.meshOptions?.density ?? 1, 0.25, 1.2);
+  const profileLimit =
+    qualityProfile.id === "compact" ? 76000 : qualityProfile.id === "balanced" ? 118000 : qualityProfile.id === "ultra" ? 260000 : 185000;
+  return Math.max(36000, Math.min(targetCount, Math.round(profileLimit * density)));
+}
+
+function preparePoseVideoRetargeter() {
+  if (!state.poseOptions?.retargetEnabled) {
+    return markPoseVideoRetargetFailure("视频驱动 3D 已关闭");
+  }
+  const target = meshAnimationSource?.skinnedMeshes?.find((mesh) => mesh?.skeleton?.bones?.length);
+  if (!target) {
+    return markPoseVideoRetargetFailure("当前没有带骨骼的 GLB/glTF");
+  }
+
+  const boneMap = createHumanoidBoneMap(target.skeleton);
+  const matchedRequired = POSE_RETARGET_REQUIRED.filter((name) => boneMap.has(name)).length;
+  if (matchedRequired < 4) {
+    return markPoseVideoRetargetFailure("当前模型骨骼命名匹配不足", matchedRequired);
+  }
+
+  meshAnimationSource.action?.stop();
+  meshAnimationSource.mixer?.stopAllAction?.();
+  target.skeleton.pose();
+  meshAnimationSource.scene.updateMatrixWorld(true);
+
+  const restBones = target.skeleton.bones.map((bone) => ({
+    bone,
+    position: bone.position.clone(),
+    quaternion: bone.quaternion.clone(),
+    scale: bone.scale.clone(),
+  }));
+  const states = new Map();
+  for (const spec of POSE_RETARGET_SPECS) {
+    const stateForBone = capturePoseRetargetBoneState(boneMap, spec);
+    if (stateForBone) {
+      states.set(spec.bone, stateForBone);
+    }
+  }
+
+  if (states.size < 4) {
+    return markPoseVideoRetargetFailure("当前模型缺少可驱动的肢体骨骼", states.size);
+  }
+
+  const restMetrics = computePoseRetargetRestMetrics(boneMap, target);
+  const rootState = capturePoseRetargetRootState(boneMap);
+  poseVideoRetargeter = {
+    mesh: target,
+    skeleton: target.skeleton,
+    boneMap,
+    states,
+    restBones,
+    previousLocalQuats: new Map(),
+    previousDirections: new Map(),
+    footLocks: createPoseRetargetFootLocks(),
+    restMetrics,
+    rootState,
+    rootMotion: new THREE.Vector3(),
+    neutralHips: null,
+    matchedBones: states.size,
+  };
+  meshAnimationSource.poseVideoDriven = true;
+  meshAnimationSource.hasAnimation = true;
+  return markPoseVideoRetargetSuccess(states.size);
+}
+
+function markPoseVideoRetargetFailure(reason, matchedBones = 0) {
+  state.poseVideoRetargetReady = false;
+  state.poseVideoRetargetReason = reason;
+  state.poseVideoRetargetMatchedBones = matchedBones;
+  return { ok: false, reason, matchedBones };
+}
+
+function markPoseVideoRetargetSuccess(matchedBones) {
+  state.poseVideoRetargetReady = true;
+  state.poseVideoRetargetReason = "";
+  state.poseVideoRetargetMatchedBones = matchedBones;
+  return { ok: true, matchedBones };
+}
+
+function stopPoseVideoRetargeter(resetPose = true) {
+  if (poseVideoRetargeter && resetPose) {
+    restorePoseRetargetRestPose(poseVideoRetargeter);
+  }
+  poseVideoRetargeter = null;
+  state.poseVideoRetargetReady = false;
+  state.poseVideoRetargetActive = false;
+  state.poseVideoRetargetMatchedBones = 0;
+  if (meshAnimationSource) {
+    meshAnimationSource.poseVideoDriven = false;
+    meshAnimationSource.hasAnimation = meshAnimationSource.nativeHasAnimation ?? Boolean(meshAnimationSource.animations?.length);
+  }
+}
+
+function computePoseRetargetRestMetrics(boneMap, mesh) {
+  const point = (role) => {
+    const bone = boneMap.get(role);
+    return bone ? bone.getWorldPosition(new THREE.Vector3()) : null;
+  };
+  const distance = (a, b) => {
+    const from = point(a);
+    const to = point(b);
+    return from && to ? from.distanceTo(to) : 0;
+  };
+  const box = new THREE.Box3();
+  for (const bone of mesh.skeleton?.bones ?? []) {
+    box.expandByPoint(bone.getWorldPosition(new THREE.Vector3()));
+  }
+  const size = box.getSize(new THREE.Vector3());
+  const height = Math.max(size.y, size.x, size.z, 0.001);
+  const shoulderWidth = distance("lupperarm", "rupperarm") || distance("lshoulder", "rshoulder");
+  const hipWidth = distance("lupperleg", "rupperleg");
+  const torsoLength = distance("hips", "chest") || distance("hips", "spine");
+  return {
+    height,
+    shoulderRatio: shoulderWidth / height || 0.18,
+    hipRatio: hipWidth / height || 0.14,
+    torsoRatio: torsoLength / height || 0.34,
+  };
+}
+
+function capturePoseRetargetRootState(boneMap) {
+  const bone = boneMap.get("hips");
+  if (!bone) return null;
+  return {
+    bone,
+    restPosition: bone.position.clone(),
+  };
+}
+
+function createPoseRetargetFootLocks() {
+  return {
+    left: { blend: 0, ankle: null, toe: null, lastCenter: null },
+    right: { blend: 0, ankle: null, toe: null, lastCenter: null },
+  };
+}
+
+function updatePoseVideoRetarget(landmarks, now) {
+  if (!state.poseOptions?.retargetEnabled) return false;
+  if (!poseVideoRetargeter) {
+    const prepared = preparePoseVideoRetargeter();
+    if (!prepared.ok) return false;
+  }
+  const points = createPoseRetargetPointMap(landmarks);
+  if (!points) return false;
+  applyPoseRetargetFrame(poseVideoRetargeter, points);
+  sampleMeshSource(meshAnimationSource);
+  meshBasePoints = meshAnimationSource.points;
+  meshTransformedPoints = transformMeshPoints(meshBasePoints, state.meshOptions, meshTransformedPoints);
+  if (state.model !== "mesh") {
+    selectModel("mesh", true);
+  }
+  setMeshPoints(particles, meshTransformedPoints, currentVisibleParticleCount("mesh"));
+  state.poseVideoRetargetActive = true;
+  state.poseVideoRetargetFrames += 1;
+  poseVideoRetargeter.lastFrameAt = now;
+  return true;
+}
+
+function createHumanoidBoneMap(skeleton) {
+  const map = new Map();
+  for (const bone of skeleton.bones) {
+    const key = canonicalBoneName(bone.name);
+    if (key && !map.has(key)) {
+      map.set(key, bone);
+    }
+  }
+  fillHumanoidBoneMapFromHierarchy(map);
+  return map;
+}
+
+function fillHumanoidBoneMapFromHierarchy(map) {
+  const hips = map.get("hips");
+  if (!hips) return;
+  if (!map.has("spine")) {
+    const spine = firstCentralChildBone(hips);
+    if (spine) map.set("spine", spine);
+  }
+  if (!map.has("chest")) {
+    const chest = firstCentralChildBone(map.get("spine"));
+    if (chest && chest !== map.get("spine")) map.set("chest", chest);
+  }
+  if (!map.has("neck")) {
+    const neck = firstCentralChildBone(map.get("chest") ?? map.get("spine"));
+    if (neck && neck !== map.get("chest")) map.set("neck", neck);
+  }
+}
+
+function firstCentralChildBone(bone) {
+  if (!bone?.children?.length) return null;
+  return bone.children.find((child) => child.isBone && !/^[lr]/.test(canonicalBoneName(child.name))) ?? null;
+}
+
+function capturePoseRetargetBoneState(boneMap, spec) {
+  const bone = boneMap.get(spec.bone);
+  if (!bone) return null;
+  const endBone = findPoseRetargetEndBone(boneMap, spec.bone, bone);
+  if (!endBone) return null;
+  const start = new THREE.Vector3();
+  const end = new THREE.Vector3();
+  bone.getWorldPosition(start);
+  endBone.getWorldPosition(end);
+  const restDir = end.sub(start);
+  if (restDir.lengthSq() < 0.000001) return null;
+  const length = restDir.length();
+  restDir.normalize();
+  return {
+    bone,
+    restDir,
+    restWorldQuaternion: bone.getWorldQuaternion(new THREE.Quaternion()),
+    restLocalQuaternion: bone.quaternion.clone(),
+    length,
+  };
+}
+
+function findPoseRetargetEndBone(boneMap, role, bone) {
+  const preferred = POSE_RETARGET_CHILD[role];
+  if (preferred && boneMap.has(preferred)) return boneMap.get(preferred);
+  return bone.children.find((child) => child.isBone) ?? null;
+}
+
+function createPoseRetargetPointMap(landmarks) {
+  const visible = landmarks
+    .map((landmark, id) => ({ landmark, id, visibility: poseVisibility(landmark) }))
+    .filter((item) => item.visibility > 0.2);
+  if (visible.length < 8) return null;
+  const bounds = poseBounds(visible);
+  const centerX = (bounds.minX + bounds.maxX) / 2;
+  const centerY = (bounds.minY + bounds.maxY) / 2;
+  const centerZ = averagePoseZ(visible);
+  const scale = 2.25 / Math.max(bounds.width, bounds.height, 0.28);
+  const points = new Map();
+  for (const id of POSE_DETAIL_NODE_IDS) {
+    const point = projectPoseLandmark(landmarks[id], id, centerX, centerY, centerZ, scale);
+    if (point) {
+      const vector = new THREE.Vector3(point.x, point.y, point.z * 1.65);
+      vector.visibility = point.visibility;
+      vector.poseId = id;
+      points.set(id, vector);
+    }
+  }
+  addPoseCompositePoint(points, "shoulders", 11, 12);
+  addPoseCompositePoint(points, "hips", 23, 24);
+  points.metrics = computePoseRetargetMetrics(points);
+  return points;
+}
+
+function addPoseCompositePoint(points, name, leftId, rightId) {
+  const left = points.get(leftId);
+  const right = points.get(rightId);
+  if (!left || !right) return;
+  const composite = new THREE.Vector3().addVectors(left, right).multiplyScalar(0.5);
+  composite.visibility = Math.min(left.visibility ?? 1, right.visibility ?? 1);
+  points.set(name, composite);
+}
+
+function computePoseRetargetMetrics(points) {
+  const values = [...points.values()];
+  const box = new THREE.Box3();
+  for (const value of values) box.expandByPoint(value);
+  const size = box.getSize(new THREE.Vector3());
+  const distance = (a, b) => {
+    const from = points.get(a);
+    const to = points.get(b);
+    return from && to ? from.distanceTo(to) : 0;
+  };
+  const shoulderWidth = distance(11, 12);
+  const hipWidth = distance(23, 24);
+  const torsoLength = distance("hips", "shoulders");
+  const bodyHeight = Math.max(size.y, 0.001);
+  const footYs = [27, 28, 29, 30, 31, 32].map((id) => points.get(id)?.y).filter((value) => Number.isFinite(value));
+  return {
+    height: bodyHeight,
+    width: Math.max(size.x, 0.001),
+    depth: Math.max(size.z, 0.001),
+    groundY: footYs.length ? Math.min(...footYs) : box.min.y,
+    shoulderRatio: shoulderWidth / bodyHeight || 0.18,
+    hipRatio: hipWidth / bodyHeight || 0.14,
+    torsoRatio: torsoLength / bodyHeight || 0.34,
+  };
+}
+
+function applyPoseRetargetFrame(retargeter, points) {
+  restorePoseRetargetRestPose(retargeter);
+  const smoothing = THREE.MathUtils.clamp(state.poseOptions?.retargetSmoothing ?? 0.35, 0, 0.85);
+  const follow = THREE.MathUtils.clamp(1 - smoothing, 0.15, 1);
+  stabilizePoseRetargetFeet(retargeter, points);
+  applyPoseRetargetRootMotion(retargeter, points, follow);
+  for (const spec of POSE_RETARGET_SPECS) {
+    const stateForBone = retargeter.states.get(spec.bone);
+    if (!stateForBone) continue;
+    const from = points.get(spec.from);
+    const to = points.get(spec.to);
+    const confidence = poseRetargetSpecConfidence(from, to);
+    if (!from || !to || confidence < 0.18) {
+      holdPoseRetargetBone(retargeter, stateForBone, spec.bone, follow);
+      continue;
+    }
+    const targetDir = new THREE.Vector3().subVectors(to, from);
+    if (targetDir.lengthSq() < 0.000001) continue;
+    applyPoseRetargetScaleAdaptation(retargeter, points, spec.bone, targetDir);
+    targetDir.normalize();
+    smoothPoseRetargetDirection(retargeter, spec.bone, targetDir, confidence);
+
+    const fullAlign = new THREE.Quaternion().setFromUnitVectors(stateForBone.restDir, targetDir);
+    const align = new THREE.Quaternion().identity().slerp(fullAlign, THREE.MathUtils.clamp(spec.strength ?? 1, 0, 1));
+    const desiredWorld = align.multiply(stateForBone.restWorldQuaternion);
+    const parentWorld = stateForBone.bone.parent?.getWorldQuaternion(new THREE.Quaternion()) ?? new THREE.Quaternion();
+    const desiredLocal = parentWorld.invert().multiply(desiredWorld).normalize();
+    const limitedLocal = limitPoseRetargetLocalQuaternion(stateForBone, desiredLocal, spec.bone, confidence);
+    const previous = retargeter.previousLocalQuats.get(spec.bone);
+    const confidenceFollow = THREE.MathUtils.clamp(follow * (0.35 + confidence * 0.65), 0.06, 1);
+    const blended = previous
+      ? previous.clone().slerp(limitedLocal, confidenceFollow)
+      : stateForBone.restLocalQuaternion.clone().slerp(limitedLocal, confidenceFollow);
+    stateForBone.bone.quaternion.copy(blended);
+    retargeter.previousLocalQuats.set(spec.bone, blended.clone());
+    stateForBone.bone.updateMatrixWorld(true);
+  }
+  retargeter.mesh.updateMatrixWorld(true);
+}
+
+function poseRetargetSpecConfidence(from, to) {
+  return THREE.MathUtils.clamp(Math.min(from?.visibility ?? 1, to?.visibility ?? 1), 0, 1);
+}
+
+function holdPoseRetargetBone(retargeter, stateForBone, key, follow) {
+  const previous = retargeter.previousLocalQuats.get(key);
+  if (!previous) return;
+  const held = previous.clone().slerp(stateForBone.restLocalQuaternion, THREE.MathUtils.clamp(0.035 + follow * 0.035, 0.035, 0.09));
+  stateForBone.bone.quaternion.copy(held);
+  retargeter.previousLocalQuats.set(key, held);
+  stateForBone.bone.updateMatrixWorld(true);
+}
+
+function smoothPoseRetargetDirection(retargeter, key, targetDir, confidence) {
+  const previous = retargeter.previousDirections.get(key);
+  if (previous) {
+    const directionFollow = THREE.MathUtils.clamp(0.32 + confidence * 0.58, 0.26, 0.9);
+    targetDir.copy(previous.clone().lerp(targetDir, directionFollow));
+    if (targetDir.lengthSq() > 0.000001) targetDir.normalize();
+  }
+  retargeter.previousDirections.set(key, targetDir.clone());
+}
+
+function limitPoseRetargetLocalQuaternion(stateForBone, desiredLocal, key, confidence) {
+  const baseLimit = POSE_RETARGET_ANGLE_LIMITS[key] ?? 1.75;
+  const confidenceScale = THREE.MathUtils.clamp(0.72 + confidence * 0.28, 0.72, 1);
+  const limit = baseLimit * confidenceScale;
+  const angle = stateForBone.restLocalQuaternion.angleTo(desiredLocal);
+  if (!Number.isFinite(angle) || angle <= limit || angle <= 0.0001) return desiredLocal;
+  return stateForBone.restLocalQuaternion.clone().slerp(desiredLocal, limit / angle).normalize();
+}
+
+function applyPoseRetargetScaleAdaptation(retargeter, points, key, direction) {
+  const metrics = points.metrics;
+  const rest = retargeter.restMetrics;
+  if (!metrics || !rest) return;
+  const isArm = key.includes("arm");
+  const isLeg = key.includes("leg") || key.includes("foot");
+  const isCore = key === "spine" || key === "chest" || key === "neck" || key === "head";
+  if (isArm && metrics.shoulderRatio > 0.001) {
+    direction.x *= THREE.MathUtils.clamp(rest.shoulderRatio / metrics.shoulderRatio, 0.78, 1.22);
+    direction.z *= 1.08;
+  } else if (isLeg && metrics.hipRatio > 0.001) {
+    direction.x *= THREE.MathUtils.clamp(rest.hipRatio / metrics.hipRatio, 0.8, 1.18);
+    direction.z *= 0.94;
+  } else if (isCore && metrics.torsoRatio > 0.001) {
+    direction.y *= THREE.MathUtils.clamp(rest.torsoRatio / metrics.torsoRatio, 0.86, 1.16);
+    direction.z *= 0.82;
+  }
+}
+
+function stabilizePoseRetargetFeet(retargeter, points) {
+  const metrics = points.metrics;
+  if (!metrics) return;
+  for (const side of ["left", "right"]) {
+    const ids = POSE_RETARGET_SIDE_POINTS[side];
+    const lock = retargeter.footLocks?.[side];
+    const ankle = points.get(ids.ankle);
+    const toe = points.get(ids.toe) ?? points.get(ids.heel);
+    if (!lock || !ankle || !toe) continue;
+    const visibility = Math.min(ankle.visibility ?? 1, toe.visibility ?? 1);
+    const center = new THREE.Vector3().addVectors(ankle, toe).multiplyScalar(0.5);
+    const velocity = lock.lastCenter ? center.distanceTo(lock.lastCenter) : 0;
+    const groundGap = center.y - metrics.groundY;
+    const planted =
+      visibility > 0.46 &&
+      groundGap < Math.max(0.075, metrics.height * 0.07) &&
+      velocity < Math.max(0.045, metrics.height * 0.055);
+
+    if (planted) {
+      if (!lock.ankle || lock.blend < 0.08) {
+        lock.ankle = ankle.clone();
+        lock.toe = toe.clone();
+      } else {
+        lock.ankle.lerp(ankle, 0.055);
+        lock.toe.lerp(toe, 0.055);
+      }
+      lock.blend = THREE.MathUtils.lerp(lock.blend, 1, 0.28);
+    } else {
+      lock.blend = THREE.MathUtils.lerp(lock.blend, 0, 0.22);
+    }
+
+    if (lock.blend > 0.025 && lock.ankle && lock.toe) {
+      const amount = THREE.MathUtils.clamp(lock.blend * 0.76, 0, 0.76);
+      ankle.lerp(lock.ankle, amount);
+      toe.lerp(lock.toe, amount * 0.92);
+    }
+    lock.lastCenter = center;
+  }
+}
+
+function applyPoseRetargetRootMotion(retargeter, points, follow) {
+  const root = retargeter.rootState;
+  const hips = points.get("hips");
+  if (!root || !hips) return;
+  if (!retargeter.neutralHips) {
+    retargeter.neutralHips = hips.clone();
+  }
+  const offset = new THREE.Vector3().subVectors(hips, retargeter.neutralHips);
+  const meshScale = 1 / Math.max(meshAnimationSource?.normalizer ?? 1, 0.001);
+  const target = new THREE.Vector3(
+    THREE.MathUtils.clamp(offset.x * 0.18, -0.22, 0.22),
+    THREE.MathUtils.clamp(offset.y * 0.14, -0.16, 0.18),
+    THREE.MathUtils.clamp(offset.z * 0.12, -0.12, 0.12),
+  ).multiplyScalar(meshScale);
+  retargeter.rootMotion.lerp(target, THREE.MathUtils.clamp(0.08 + follow * 0.22, 0.08, 0.3));
+  root.bone.position.copy(root.restPosition).add(retargeter.rootMotion);
+  root.bone.updateMatrixWorld(true);
+}
+
+function restorePoseRetargetRestPose(retargeter) {
+  for (const item of retargeter.restBones) {
+    item.bone.position.copy(item.position);
+    item.bone.quaternion.copy(item.quaternion);
+    item.bone.scale.copy(item.scale);
+  }
+  retargeter.mesh.updateMatrixWorld(true);
+}
+
+function tryApplyBvhToMesh(bvh, fileName) {
+  const target = meshAnimationSource?.skinnedMeshes?.find((mesh) => mesh?.skeleton?.bones?.length);
+  if (!target) {
+    return { ok: false, reason: "当前没有带骨骼的 GLB/glTF，因此改用 BVH 粒子骨架播放" };
+  }
+
+  const resolver = createBvhBoneResolver(target.skeleton, bvh.skeleton);
+  if (resolver.matchedBones < 8) {
+    return { ok: false, reason: "BVH 与当前 GLB/glTF 的骨骼命名匹配较少，因此改用 BVH 粒子骨架播放" };
+  }
+
   try {
-    const loader = new GLTFLoader();
-    const gltf = await new Promise((resolve, reject) => {
-      loader.load(
-        url,
-        resolve,
-        (event) => {
-          const ratio = event.total > 0 ? event.loaded / event.total : 0.35;
-          onProgress?.({ value: 0.12 + Math.min(0.38, ratio * 0.38), label: "正在读取 GLB 文件" });
-        },
-        reject,
-      );
+    if (meshAnimationEnabled) {
+      meshAnimationEnabled.checked = true;
+      meshAnimationEnabled.dispatchEvent(new Event("change", { bubbles: true }));
+    } else {
+      state.meshOptions = { ...state.meshOptions, animationEnabled: true };
+    }
+    const retargetedClip = SkeletonUtils.retargetClip(target, bvh.skeleton, bvh.clip, {
+      fps: 24,
+      hip: resolver.hipName,
+      hipInfluence: new THREE.Vector3(0.65, 0.45, 0.65),
+      preserveBonePositions: true,
+      getBoneName: resolver.getBoneName,
     });
-    onProgress?.({ value: 0.55, label: "正在解析网格表面" });
-    gltf.scene.updateMatrixWorld(true);
-    const triangles = [];
-    const box = new THREE.Box3();
-
-    gltf.scene.traverse((object) => {
-      if (!object.isMesh || !object.geometry?.attributes?.position) return;
-      const geometry = object.geometry;
-      const position = geometry.attributes.position;
-      const index = geometry.index;
-      const color = meshMaterialColor(object.material);
-      const colorAttribute = geometry.attributes.color;
-      const matrix = object.matrixWorld;
-      const a = new THREE.Vector3();
-      const b = new THREE.Vector3();
-      const c = new THREE.Vector3();
-      const count = index ? index.count : position.count;
-      for (let i = 0; i < count; i += 3) {
-        const ia = index ? index.getX(i) : i;
-        const ib = index ? index.getX(i + 1) : i + 1;
-        const ic = index ? index.getX(i + 2) : i + 2;
-        a.fromBufferAttribute(position, ia).applyMatrix4(matrix);
-        b.fromBufferAttribute(position, ib).applyMatrix4(matrix);
-        c.fromBufferAttribute(position, ic).applyMatrix4(matrix);
-        const area = new THREE.Triangle(a, b, c).getArea();
-        if (area <= 0.000001) continue;
-        triangles.push({
-          a: a.clone(),
-          b: b.clone(),
-          c: c.clone(),
-          area,
-          color: color.clone(),
-          colorA: colorAttribute ? readVertexColor(colorAttribute, ia) : null,
-          colorB: colorAttribute ? readVertexColor(colorAttribute, ib) : null,
-          colorC: colorAttribute ? readVertexColor(colorAttribute, ic) : null,
-        });
-        box.expandByPoint(a);
-        box.expandByPoint(b);
-        box.expandByPoint(c);
-      }
-    });
-
-    if (triangles.length === 0) {
-      throw new Error("GLB 中没有可采样的网格表面");
+    if (!retargetedClip?.tracks?.length) {
+      throw new Error("未生成可用骨骼轨道");
     }
-
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-    const normalizer = 2.28 / Math.max(size.x, size.y, size.z, 0.001);
-    const cumulative = [];
-    let totalArea = 0;
-    for (const triangle of triangles) {
-      totalArea += triangle.area;
-      cumulative.push(totalArea);
-    }
-
-    const desiredCount = Number.isFinite(targetCount) && targetCount > 0 ? targetCount : triangles.length * 16;
-    const sampleCount = Math.min(980000, Math.max(36000, desiredCount));
-    onProgress?.({ value: 0.72, label: "正在采样模型表面" });
-    const points = [];
-    for (let i = 0; i < sampleCount; i += 1) {
-      const pick = hash01(i * 12.9898) * totalArea;
-      const triangle = triangles[lowerBound(cumulative, pick)] ?? triangles[triangles.length - 1];
-      let u = hash01(i * 78.233);
-      let v = hash01(i * 37.719);
-      if (u + v > 1) {
-        u = 1 - u;
-        v = 1 - v;
-      }
-      const w = 1 - u - v;
-      const point = new THREE.Vector3()
-        .addScaledVector(triangle.a, u)
-        .addScaledVector(triangle.b, v)
-        .addScaledVector(triangle.c, w)
-        .sub(center)
-        .multiplyScalar(normalizer);
-      const sampledColor = sampleTriangleColor(triangle, u, v, w);
-      const colorTotal = sampledColor.r + sampledColor.g + sampledColor.b + 0.001;
-      const baseJitter = 0.004;
-      points.push({
-        x: point.x,
-        y: point.y,
-        z: point.z,
-        baseX: point.x,
-        baseY: point.y,
-        baseZ: point.z,
-        r: sampledColor.r,
-        g: sampledColor.g,
-        b: sampledColor.b,
-        a: 1,
-        mix: THREE.MathUtils.clamp((sampledColor.g * 0.45 + sampledColor.b * 0.65) / colorTotal, 0, 1),
-        glow: 0.54 + hash01(i * 5.91) * 0.28,
-        jitter: baseJitter,
-        baseJitter,
-      });
-      if (i > 0 && i % 18000 === 0) {
-        onProgress?.({ value: 0.72 + Math.min(0.18, (i / sampleCount) * 0.18), label: "正在采样模型表面" });
-      }
-    }
-    return points;
-  } finally {
-    URL.revokeObjectURL(url);
+    stopBvhParticleMotion();
+    meshAnimationSource.action?.stop();
+    meshAnimationSource.mixer?.stopAllAction?.();
+    meshAnimationSource.mixer = new THREE.AnimationMixer(target);
+    meshAnimationSource.action = meshAnimationSource.mixer.clipAction(retargetedClip);
+    meshAnimationSource.action.reset().play();
+    meshAnimationSource.animations = [retargetedClip];
+    meshAnimationSource.hasAnimation = true;
+    meshAnimationSource.enabled = true;
+    meshAnimationSource.bvhFileName = fileName;
+    meshAnimationSource.lastSampleAt = 0;
+    updateMeshAnimationPlaybackForSource(meshAnimationSource);
+    sampleMeshSource(meshAnimationSource);
+    meshBasePoints = meshAnimationSource.points;
+    meshTransformedPoints = transformMeshPoints(meshBasePoints, state.meshOptions, meshTransformedPoints);
+    setMeshPoints(particles, meshTransformedPoints, currentVisibleParticleCount("mesh"));
+    return { ok: true, matchedBones: resolver.matchedBones };
+  } catch (error) {
+    console.warn("BVH retarget failed", error);
+    return { ok: false, reason: "BVH 重定向失败，已改用 BVH 粒子骨架播放" };
   }
 }
 
-function meshMaterialColor(material) {
-  const source = Array.isArray(material) ? material.find((item) => item?.color instanceof THREE.Color) : material;
-  return source?.color instanceof THREE.Color ? source.color : new THREE.Color("#ffffff");
-}
-
-function readVertexColor(attribute, index) {
-  return new THREE.Color(attribute.getX(index), attribute.getY(index), attribute.getZ(index));
-}
-
-function sampleTriangleColor(triangle, u, v, w) {
-  if (!triangle.colorA || !triangle.colorB || !triangle.colorC) {
-    return triangle.color;
+function createBvhBoneResolver(targetSkeleton, sourceSkeleton) {
+  const sourceByCanonical = new Map();
+  const sourceByName = new Map();
+  for (const bone of sourceSkeleton.bones) {
+    sourceByName.set(bone.name, bone.name);
+    const key = canonicalBoneName(bone.name);
+    if (key && !sourceByCanonical.has(key)) {
+      sourceByCanonical.set(key, bone.name);
+    }
   }
-  return new THREE.Color(
-    triangle.colorA.r * u + triangle.colorB.r * v + triangle.colorC.r * w,
-    triangle.colorA.g * u + triangle.colorB.g * v + triangle.colorC.g * w,
-    triangle.colorA.b * u + triangle.colorB.b * v + triangle.colorC.b * w,
-  );
+
+  const targetToSource = new Map();
+  let matchedBones = 0;
+  for (const bone of targetSkeleton.bones) {
+    const direct = sourceByName.get(bone.name);
+    const canonical = sourceByCanonical.get(canonicalBoneName(bone.name));
+    const sourceName = direct ?? canonical;
+    if (sourceName) {
+      targetToSource.set(bone.name, sourceName);
+      matchedBones += 1;
+    }
+  }
+
+  return {
+    matchedBones,
+    hipName: sourceByCanonical.get("hips") ?? sourceSkeleton.bones[0]?.name ?? "Hips",
+    getBoneName: (bone) => targetToSource.get(bone.name),
+  };
+}
+
+function startBvhParticleMotion(bvh, fileName) {
+  stopBvhParticleMotion();
+  const root = bvh.skeleton.bones[0];
+  const mixer = new THREE.AnimationMixer(root);
+  const action = mixer.clipAction(bvh.clip);
+  action.setLoop(state.motionOptions?.loop === false ? THREE.LoopOnce : THREE.LoopRepeat, state.motionOptions?.loop === false ? 1 : Infinity);
+  action.clampWhenFinished = state.motionOptions?.loop === false;
+  action.reset().play();
+  bvhMotionSource = {
+    fileName,
+    root,
+    skeleton: bvh.skeleton,
+    clip: bvh.clip,
+    mixer,
+    action,
+    points: [],
+    lastSampleAt: 0,
+  };
+  bvhMotionSource.points = createBvhPointCloud(bvhMotionSource, currentBvhSampleTarget());
+  setPosePoints(particles, bvhMotionSource.points, currentVisibleParticleCount("pose"));
+}
+
+function stopBvhParticleMotion() {
+  if (!bvhMotionSource) return;
+  bvhMotionSource.action?.stop();
+  bvhMotionSource.mixer?.stopAllAction?.();
+  bvhMotionSource = null;
+}
+
+function updateBvhParticleMotion(delta, now) {
+  if (!bvhMotionSource) return;
+  updateBvhPlaybackOptions();
+  bvhMotionSource.mixer.update(delta);
+  if (state.model !== "pose") return;
+  if (now - bvhMotionSource.lastSampleAt < 68) return;
+  bvhMotionSource.lastSampleAt = now;
+  bvhMotionSource.points = createBvhPointCloud(bvhMotionSource, currentBvhSampleTarget());
+  setPosePoints(particles, bvhMotionSource.points, currentVisibleParticleCount("pose"));
+}
+
+function updateBvhPlaybackOptions() {
+  if (!bvhMotionSource?.action || !bvhMotionSource?.mixer) return;
+  const loop = state.motionOptions?.loop !== false;
+  bvhMotionSource.action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
+  bvhMotionSource.action.clampWhenFinished = !loop;
+  bvhMotionSource.mixer.timeScale = THREE.MathUtils.clamp(state.motionOptions?.speed ?? 1, 0.25, 2.2);
+}
+
+function currentBvhSampleTarget() {
+  const density = THREE.MathUtils.clamp(state.motionOptions?.density ?? 1, 0.35, 1.8);
+  const base = qualityProfile.id === "compact" ? 7200 : qualityProfile.id === "balanced" ? 10800 : qualityProfile.id === "ultra" ? 26000 : 18000;
+  return Math.min(36000, Math.max(5200, Math.round((base * density) / 100) * 100));
+}
+
+function createBvhPointCloud(source, targetCount) {
+  const bones = source.skeleton.bones.filter(Boolean);
+  if (!bones.length) return createFallbackPosePointCloud(targetCount);
+  source.root.updateMatrixWorld(true);
+  const rawPositions = new Map();
+  const box = new THREE.Box3();
+  const temp = new THREE.Vector3();
+  for (const bone of bones) {
+    bone.getWorldPosition(temp);
+    rawPositions.set(bone, temp.clone());
+    box.expandByPoint(temp);
+  }
+  if (box.isEmpty()) return createFallbackPosePointCloud(targetCount);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const scale = (2.46 * THREE.MathUtils.clamp(state.motionOptions?.size ?? 1, 0.45, 2.6)) / Math.max(size.x, size.y, size.z, 0.001);
+  const nodes = new Map();
+  for (const bone of bones) {
+    const raw = rawPositions.get(bone);
+    const side = bvhBoneSide(bone.name);
+    nodes.set(bone, {
+      id: bone.name,
+      side,
+      x: (raw.x - center.x) * scale,
+      y: (raw.y - center.y) * scale + 0.05,
+      z: (raw.z - center.z) * scale,
+      visibility: 1,
+    });
+  }
+
+  const connections = [];
+  let totalLength = 0;
+  for (const bone of bones) {
+    if (!bone.parent?.isBone || !nodes.has(bone.parent)) continue;
+    const from = nodes.get(bone.parent);
+    const to = nodes.get(bone);
+    const length = Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
+    if (length <= 0.002) continue;
+    const side = from.side === to.side ? from.side : "core";
+    connections.push({ from, to, length, side });
+    totalLength += length;
+  }
+  if (!connections.length) return createFallbackPosePointCloud(targetCount);
+
+  const colors = posePaletteColors();
+  const points = [];
+  const limbBudget = Math.round(targetCount * 0.74);
+  for (let i = 0; i < connections.length; i += 1) {
+    const connection = connections[i];
+    const count = Math.max(22, Math.round((connection.length / totalLength) * limbBudget));
+    appendPoseLimbPoints(points, connection, count, colors, i + 41);
+  }
+
+  const keyNodes = [...nodes.values()].filter((node) => isBvhKeyJoint(node.id));
+  const jointBudget = Math.max(260, Math.round(targetCount * 0.16));
+  const jointCount = Math.max(16, Math.round(jointBudget / Math.max(1, keyNodes.length)));
+  for (let i = 0; i < keyNodes.length; i += 1) {
+    appendBvhJointPoints(points, keyNodes[i], jointCount, colors, i + 7);
+  }
+
+  appendBvhAuraPoints(points, keyNodes, colors, Math.max(180, Math.round(targetCount * 0.1)));
+  if (points.length > targetCount) points.length = targetCount;
+  return points;
+}
+
+function appendBvhJointPoints(points, point, count, colors, seedOffset) {
+  const color = poseSideColor(point.side, colors);
+  const radius = point.side === "core" ? 0.052 : 0.04;
+  for (let i = 0; i < count; i += 1) {
+    const angle = hash01((i + 1) * 10.19 + seedOffset * 4.7) * Math.PI * 2;
+    const ring = Math.sqrt(hash01((i + 1) * 6.37 + seedOffset * 2.1)) * radius;
+    const lift = (hash01((i + 1) * 3.51 + seedOffset * 12.1) - 0.5) * radius * 0.82;
+    points.push({
+      x: point.x + Math.cos(angle) * ring,
+      y: point.y + Math.sin(angle) * ring,
+      z: point.z + lift,
+      r: color.r,
+      g: color.g,
+      b: color.b,
+      a: 0.92,
+      mix: color.mix,
+      glow: 1.02 + hash01((i + 1) * 2.29 + seedOffset) * 0.32,
+      jitter: 0.0012,
+      kind: 2,
+    });
+  }
+}
+
+function appendBvhAuraPoints(points, nodes, colors, count) {
+  const featured = nodes.filter((node) => /head|hand|foot|toe/i.test(node.id));
+  const pool = featured.length ? featured : nodes;
+  for (let i = 0; i < count; i += 1) {
+    const base = pool[Math.floor(hash01(i * 4.73) * pool.length)] ?? pool[0];
+    const color = poseSideColor(base.side, colors);
+    const angle = hash01(i * 9.41 + 0.27) * Math.PI * 2;
+    const radius = 0.075 + hash01(i * 7.17 + 0.4) * 0.2;
+    points.push({
+      x: base.x + Math.cos(angle) * radius,
+      y: base.y + Math.sin(angle) * radius * 0.72,
+      z: base.z + (hash01(i * 6.91 + 0.12) - 0.5) * 0.3,
+      r: Math.min(1, color.r * 1.08 + 0.05),
+      g: Math.min(1, color.g * 1.08 + 0.05),
+      b: Math.min(1, color.b * 1.08 + 0.05),
+      a: 0.46,
+      mix: color.mix,
+      glow: 0.7 + hash01(i * 2.51) * 0.42,
+      jitter: 0.0025,
+      kind: 3,
+    });
+  }
+}
+
+function bvhBoneSide(name) {
+  const canonical = canonicalBoneName(name);
+  if (canonical.startsWith("l")) return "left";
+  if (canonical.startsWith("r")) return "right";
+  return "core";
+}
+
+function isBvhKeyJoint(name) {
+  const canonical = canonicalBoneName(name);
+  return /hips|spine|chest|neck|head|shoulder|upperarm|lowerarm|hand|upperleg|lowerleg|foot|toe/.test(canonical);
 }
 
 function lowerBound(values, target) {

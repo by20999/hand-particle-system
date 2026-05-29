@@ -410,6 +410,54 @@ h1 {
   text-align: right;
 }
 
+.health-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin: 10px 0 2px;
+}
+
+.health-item {
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.052);
+}
+
+.health-item span,
+.health-item strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.health-item span {
+  color: #8fa0b6;
+  font-size: 11px;
+}
+
+.health-item strong {
+  margin-top: 3px;
+  color: #e8f1fb;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.health-item.is-ok {
+  border-color: color-mix(in srgb, var(--accent-secondary) 30%, transparent);
+}
+
+.health-item.is-warn {
+  border-color: rgba(255, 197, 86, 0.36);
+}
+
+.health-item.is-error {
+  border-color: rgba(255, 93, 93, 0.38);
+}
+
 .theme-field {
   align-items: start;
 }
@@ -911,6 +959,25 @@ h1 {
 
 .import-progress.is-error .import-progress-fill {
   background: #ff5d5d;
+}
+
+.format-guide {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin: 8px 0 4px;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(230, 238, 248, 0.86);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.format-guide strong {
+  color: #fff;
+  font-weight: 700;
 }
 
 .import-controls {

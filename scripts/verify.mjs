@@ -261,7 +261,9 @@ async function verifyInteractions(activeBrowser) {
       if (poseState.model !== "pose") {
         throw new Error(`interaction: pose video did not activate pose model: ${poseState.diagnostic}`);
       }
-      if (poseState.diagnostic.includes("失败")) {
+      const expectedFallback =
+        poseState.diagnostic.includes("已回退成原粒子骨架") || poseState.diagnostic.includes("已回退为粒子骨架");
+      if (poseState.diagnostic.includes("失败") && !expectedFallback) {
         throw new Error(`interaction: pose video import failed: ${poseState.diagnostic}`);
       }
     }

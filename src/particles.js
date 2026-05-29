@@ -308,13 +308,13 @@ export function setParticleTargets(particles, model, options = {}) {
   } else if (model === "image") {
     writePointCloudTargets(particles.customImagePoints, particles);
   } else if (model === "mesh") {
-    writePointCloudTargets(particles.customMeshPoints, particles);
+    writePointCloudTargets(particles.customMeshPoints, particles, writeCount);
   } else if (model === "pose") {
     writePointCloudTargets(particles.customPosePoints, particles, writeCount);
   } else {
     writeShapeTargets(model, particles);
   }
-  const updatedCount = model === "pose" ? writeCount : particles.count;
+  const updatedCount = model === "pose" || model === "mesh" ? writeCount : particles.count;
   syncTargetDirectionAttribute(particles, updatedCount);
   syncParticleParamsAttribute(particles, updatedCount);
   if (model !== "pose") {
@@ -353,9 +353,9 @@ export function setImagePoints(particles, points) {
   setParticleTargets(particles, "image");
 }
 
-export function setMeshPoints(particles, points) {
+export function setMeshPoints(particles, points, writeCount = particles.count) {
   particles.customMeshPoints = points;
-  setParticleTargets(particles, "mesh");
+  setParticleTargets(particles, "mesh", { writeCount });
 }
 
 export function setPosePoints(particles, points, writeCount = particles.visibleCount ?? particles.count) {
@@ -524,6 +524,7 @@ export function updateParticles(particles, state, options) {
   material.uniforms.uPointer.value.lerp(pointerDirection, pointingBlend > 0.04 ? 0.1 : 0.18);
 
   const bloomToneDown = isImageModel ? 0.48 : isPoseModel ? 0.58 : isTextModel ? 0.6 : isFireworksModel ? 0.76 : 0.7;
+  const safetyBloom = state.safetyMode ? 0.62 : 1;
   const brightnessBloom = THREE.MathUtils.clamp(modelBrightness * (isImageModel || isPoseModel ? Math.pow(imageBrightness, 0.32) : 1), 0.62, 1.9);
   const rawBloom =
     (0.3 +
@@ -534,7 +535,8 @@ export function updateParticles(particles, state, options) {
       (isPoseModel ? musicTransient * 0.08 + musicShimmer * 0.03 : 0) +
       (isFireworksModel ? fireworkExplosion * 0.34 : 0)) *
     bloomToneDown *
-    brightnessBloom;
+    brightnessBloom *
+    safetyBloom;
   bloomPass.strength = THREE.MathUtils.clamp(rawBloom, 0.18, isImageModel ? 0.9 : isPoseModel ? 0.74 : isFireworksModel ? 0.76 : 0.68);
   const imagePointBoost = isImageModel ? 0.9 + imageScale * 0.18 + Math.min(imageBrightness, 4.2) * 0.045 : 1;
   material.uniforms.uPointSize.value =
